@@ -9,7 +9,7 @@ const dom = {
   loading: $('loadingScreen'), loadingFill: $('loadingFill'), loadingStatus: $('loadingStatus'),
   start: $('startScreen'), pause: $('pauseScreen'), death: $('deathScreen'), win: $('winScreen'), error: $('errorScreen'), errorText: $('errorText'),
   startButton: $('startButton'), resumeButton: $('resumeButton'), restartButton: $('restartButton'), retryButton: $('retryButton'), playAgainButton: $('playAgainButton'), pauseButton: $('pauseButton'),
-  objectiveHistory: $('objectiveHistory'), objectiveCurrent: $('objectiveCurrent'), onlineStatus: $('onlineStatus'), trapNotice: $('trapNotice'),
+  objectiveHistory: $('objectiveHistory'), objectiveCurrent: $('objectiveCurrent'), onlineStatus: $('onlineStatus'), observerStatus: $('observerStatus'), trapNotice: $('trapNotice'),
   jumpscareScreen: $('jumpscareScreen'),
   hud: $('hud'), crosshair: $('crosshair'), interactPrompt: $('interactPrompt'), interactLabel: $('interactLabel'),
   objectiveText: $('objectiveText'), staminaFill: $('staminaFill'), damageFlash: $('damageFlash'),
@@ -17,6 +17,15 @@ const dom = {
 };
 
 const mobileDevice = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+// Safari (WebKit без Chrome) ведёт себя ненадёжно с Pointer Lock: при попытке
+// повернуть камеру окно «слетает» (теряет фокус/пытается свернуться). В Safari
+// вращение камеры делаем через удержание мыши (drag-look), pointer lock оставляем
+// только для Chrome/Firefox/Edge.
+const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome|CriOS|Edg|OPR/.test(navigator.userAgent);
+
+function shouldUsePointerLock() {
+  return !mobileDevice && !isSafari && !game.pointerLockUnsupported;
+}
 const MAX_DELTA = 0.05;
 const UPPER_FLOOR_Y = 3.0;
 // The flight turns 90° to the right (east) and is nudged 0.2 m toward the rear/south.
@@ -79,6 +88,8 @@ const game = {
   inventory: new Set(),
   ai: { state: 'patrol', waypoint: 0, searchTimer: 0, losTimer: 0, seesPlayer: false, floor: 0, targetUid: null, timeInState: 0, lastSeen: null, lastHeard: null, searchOrigin: null, searchIndex: 0, stuckTimer: 0, trapTimer: 0, attackPlayed: false, path: [], pathIndex: 0, pathTimer: 0, pathGoal: null, pathFloor: 0, pathMode: null },
   online: null, localAvatar: null, remotePlayers: new Map(), onlineSyncTimer: 0, pendingRemoteWorld: null, pendingHostId: null, remoteGrannyState: null,
+  observer: false, watchingUid: null,
+  pointerLockUnsupported: false,
   traps: [], trapNoticeTimer: 0,
   deathSequence: null, jumpscarePlayed: false,
 };
@@ -636,7 +647,7 @@ function buildWallDecor() {
   }
 }
 
-function createPlayerAvatar(uid, color = PLAYER_COLORS[0]) {
+function createPlayerAvatar(uid, color = PLAYER_COLORS[0], withEyes = true) {
   const root = new THREE.Group();
   root.name = `online-player-${uid}`;
   const bodyMaterial = new THREE.MeshStandardMaterial({ color, roughness: 0.78, metalness: 0.02 });
@@ -644,26 +655,30 @@ function createPlayerAvatar(uid, color = PLAYER_COLORS[0]) {
   body.position.y = 0.85;
   body.castShadow = false;
   root.add(body);
-  const eyeGroup = new THREE.Group();
-  eyeGroup.position.y = 1.52;
-  const white = new THREE.MeshStandardMaterial({ color: 0xf7f5ea, roughness: 0.35 });
-  const pupilMaterial = new THREE.MeshStandardMaterial({ color: 0x171a17, roughness: 0.32 });
-  for (const x of [-0.115, 0.115]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), white);
-    eye.position.set(x, 0, -0.285);
-    eyeGroup.add(eye);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.033, 8, 6), pupilMaterial);
-    pupil.position.set(x, -0.005, -0.35);
-    eyeGroup.add(pupil);
+  // У местного игрока (у того, у кого активна камера) глаз нет — они были видны
+  // только для других; у чужих аватаров глаза остаются.
+  if (withEyes) {
+    const eyeGroup = new THREE.Group();
+    eyeGroup.position.y = 1.52;
+    const white = new THREE.MeshStandardMaterial({ color: 0xf7f5ea, roughness: 0.35 });
+    const pupilMaterial = new THREE.MeshStandardMaterial({ color: 0x171a17, roughness: 0.32 });
+    for (const x of [-0.115, 0.115]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 8), white);
+      eye.position.set(x, 0, -0.285);
+      eyeGroup.add(eye);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.033, 8, 6), pupilMaterial);
+      pupil.position.set(x, -0.005, -0.35);
+      eyeGroup.add(pupil);
+    }
+    const eyeShineMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    for (const x of [-0.125, 0.105]) {
+      const shine = new THREE.Mesh(new THREE.SphereGeometry(0.012, 6, 4), eyeShineMaterial);
+      shine.position.set(x, 0.025, -0.377);
+      eyeGroup.add(shine);
+    }
+    root.add(eyeGroup);
+    root.userData.eyeGroup = eyeGroup;
   }
-  const eyeShineMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  for (const x of [-0.125, 0.105]) {
-    const shine = new THREE.Mesh(new THREE.SphereGeometry(0.012, 6, 4), eyeShineMaterial);
-    shine.position.set(x, 0.025, -0.377);
-    eyeGroup.add(shine);
-  }
-  root.add(eyeGroup);
-  root.userData.eyeGroup = eyeGroup;
   root.userData.playerId = uid;
   root.userData.target = { x: 0, z: 0, y: 0, yaw: 0, pitch: 0 };
   scene.add(root);
@@ -710,14 +725,16 @@ function receiveOnlinePlayers(players) {
     remote.target.pitch = Number.isFinite(data.pitch) ? data.pitch : remote.target.pitch;
     remote.target.floor = data.floor === 1 ? 1 : 0;
     remote.target.crouched = Boolean(data.crouched);
+    remote.target.alive = data.alive !== false;
   }
   for (const [uid, remote] of game.remotePlayers) {
     if (!active.has(uid)) { scene.remove(remote.root); game.remotePlayers.delete(uid); }
   }
   if (dom.onlineStatus && game.online) {
     clearTimeout(onlineStatusTimer);
-    const count = Math.min(4, 1 + game.remotePlayers.size);
-    dom.onlineStatus.textContent = `ОНЛАЙН · ${count}/4`;
+    // Считаем только живых (не пойманных) игроков.
+    const alive = [...game.remotePlayers.values()].filter((remote) => remote.target.alive !== false).length + (game.observer ? 0 : 1);
+    dom.onlineStatus.textContent = `ОНЛАЙН · ${Math.min(4, alive)}/4`;
     dom.onlineStatus.classList.remove('hidden', 'error');
   }
 }
@@ -810,7 +827,7 @@ function updateRemoteGranny(dt) {
   }
   granny.mixer?.update(dt);
   const near = game.player.floor === granny.floor && Math.hypot(game.player.x - granny.root.position.x, game.player.z - granny.root.position.z) < 1.7;
-  if (target.state === 'attack' && near && !game.deathSequence && !game.finished) beginJumpscare();
+  if (target.state === 'attack' && near && !game.deathSequence && !game.finished && !game.observer) beginJumpscare();
 }
 
 function updateRemotePlayers(dt) {
@@ -823,7 +840,8 @@ function updateRemotePlayers(dt) {
     if (root.userData.eyeGroup) root.userData.eyeGroup.rotation.x = THREE.MathUtils.damp(root.userData.eyeGroup.rotation.x, target.pitch, 8, dt);
   }
   const local = game.localAvatar;
-  if (local) {
+  // У пойманного игрока авата́р остаётся стоять на месте, как тело; движение прекращено.
+  if (local && !game.observer) {
     local.position.set(game.player.x, game.player.floorY, game.player.z);
     local.rotation.y = game.cameraYaw;
     if (local.userData.eyeGroup) local.userData.eyeGroup.rotation.x = game.cameraPitch;
@@ -833,12 +851,22 @@ function updateRemotePlayers(dt) {
 function publishOnlinePlayer(dt) {
   if (!game.online?.publish || !game.started) return;
   game.onlineSyncTimer -= dt;
+  // Пойманный игрок больше не слает свою позицию (только раз «пойман» при входе в наблюдение),
+  // но хост продолжает публиковать бабку — иначе симуляция остановится для всех.
+  if (game.observer) {
+    if (game.online.hostId === game.online.uid && granny && game.online.publishWorld) {
+      game.online.publishWorld({ granny: { x: granny.root.position.x, z: granny.root.position.z, floor: granny.floor, yaw: granny.root.rotation.y, state: game.ai.state } })
+        .catch((error) => console.debug('Firebase Granny update:', error));
+    }
+    return;
+  }
   if (game.onlineSyncTimer > 0) return;
   game.onlineSyncTimer = 0.1;
   game.online.publish({
     x: game.player.x, z: game.player.z, floor: game.player.floor,
     floorY: game.player.floorY, yaw: game.cameraYaw, pitch: game.cameraPitch,
     crouched: game.player.crouched, color: game.online.profile.color, displayName: game.online.profile.displayName,
+    alive: true,
   }).catch((error) => console.debug('Firebase presence update:', error));
   if (game.online.hostId === game.online.uid && granny && game.online.publishWorld) {
     game.online.publishWorld({ granny: { x: granny.root.position.x, z: granny.root.position.z, floor: granny.floor, yaw: granny.root.rotation.y, state: game.ai.state } })
@@ -1871,6 +1899,7 @@ function doInteract() {
 function updatePlayer(dt) {
   const p = game.player;
   if (updateStairTransition(dt)) return;
+  if (game.observer) return; // Пойманный игрок смотрит за остальными — он движется только как статичное тело.
   p.trappedTimer = Math.max(0, p.trappedTimer - dt);
   let inputX = 0, inputY = 0;
   if (game.keys.has('KeyA') || game.keys.has('ArrowLeft')) inputX -= 1;
@@ -1948,8 +1977,15 @@ function transitionGrannyFloor(nextFloor) {
   ai.path = []; ai.pathIndex = 0; ai.pathTimer = 0; ai.pathGoal = null; ai.pathMode = null;
 }
 
-function beginJumpscare() {
+function beginJumpscare(asObserver = false) {
   if (game.deathSequence || game.finished || !granny) return;
+  // В мультиплеере пойманный игрок не «умирает» — он становится наблюдателем:
+  // камера переходит к первому лицу другого игрока, бабка продолжает преследовать
+  // оставшихся (и не вешается, потому что симуляция не остановилась).
+  if (game.online) {
+    enterObserverMode();
+    return;
+  }
   const forward = new THREE.Vector3();
   camera.getWorldDirection(forward);
   const horizontal = new THREE.Vector3(forward.x, 0, forward.z).normalize();
@@ -2000,14 +2036,87 @@ function updateJumpscare() {
   }
 }
 
+// --- Режим наблюдателя (мультиплеер): пойманный игрок смотрит за остальными ---
+
+function showObserverStatus(message = 'НАБЛЮДЕНИЕ') {
+  if (!dom.observerStatus) return;
+  dom.observerStatus.textContent = message;
+  dom.observerStatus.classList.remove('hidden');
+}
+
+function hideObserverStatus() {
+  dom.observerStatus?.classList.add('hidden');
+}
+
+function enterObserverMode() {
+  game.observer = true;
+  game.watchingUid = null;
+  // Игра не ставится на паузу: симуляция бабки (на хосте) продолжается,
+  // и она не вешается после ловли одного игрока.
+  game.paused = false;
+  if (document.pointerLockElement) document.exitPointerLock?.();
+  game.mouseDrag = false;
+  // Сообщаем остальным, что этот игрок пойман — его больше не преследует бабка.
+  if (game.online?.publish) game.online.publish({ caught: true, alive: false }).catch(() => {});
+  showObserverStatus('НАБЛЮДЕНИЕ · Смотрите за остальными');
+}
+
+// Кого смотреть: ближайший живой (не пойманный) другой игрок.
+function pickWatchedPlayer() {
+  if (!game.remotePlayers.size) return null;
+  let best = null, bestDistance = Infinity;
+  const ox = game.player.x, oz = game.player.z;
+  for (const [uid, remote] of game.remotePlayers) {
+    if (remote.target.alive === false) continue;
+    const d = Math.hypot(remote.target.x - ox, remote.target.z - oz);
+    if (d < bestDistance) { bestDistance = d; best = remote; }
+  }
+  return best;
+}
+
+function updateObserverCamera(dt) {
+  const watched = pickWatchedPlayer();
+  if (!watched) {
+    // Никого живым не осталось — для наблюдателя игра окончена (погибель, не победа).
+    game.observer = false;
+    hideObserverStatus();
+    game.finished = true;
+    game.paused = true;
+    if (document.pointerLockElement) document.exitPointerLock?.();
+    dom.death.classList.remove('hidden');
+    return;
+  }
+  game.watchingUid = watched.root.userData.playerId;
+  const t = watched.target;
+  const height = t.crouched ? 1.12 : 1.68;
+  const floorY = Number.isFinite(t.floorY) ? t.floorY : (t.floor ? UPPER_FLOOR_Y : 0);
+  camera.position.set(
+    THREE.MathUtils.damp(camera.position.x, t.x, 8, dt),
+    THREE.MathUtils.damp(camera.position.y, floorY + height + 0.02, 8, dt),
+    THREE.MathUtils.damp(camera.position.z, t.z, 8, dt),
+  );
+  camera.rotation.set(
+    THREE.MathUtils.damp(camera.rotation.x, Number.isFinite(t.pitch) ? t.pitch : 0, 8, dt),
+    THREE.MathUtils.damp(camera.rotation.y, Number.isFinite(t.yaw) ? t.yaw : 0, 8, dt),
+    0,
+    'YXZ',
+  );
+}
+
 function updateGranny(dt) {
   if (!granny || !grannyReady) return;
   const ai = game.ai;
   const gx = granny.root.position.x, gz = granny.root.position.z;
-  const candidates = [{ ...game.player, uid: game.online?.uid || 'local' }];
+  // Пойманный (наблюдатель) игрок не участвует в охоте; пойманные чужие — тоже.
+  const candidates = [];
+  if (!game.observer) candidates.push({ ...game.player, uid: game.online?.uid || 'local' });
   if (game.online && game.online.hostId === game.online.uid) {
-    for (const [uid, remote] of game.remotePlayers) candidates.push({ ...remote.target, uid, crouched: remote.target.crouched });
+    for (const [uid, remote] of game.remotePlayers) {
+      if (remote.target.alive === false) continue;
+      candidates.push({ ...remote.target, uid, crouched: remote.target.crouched });
+    }
   }
+  if (!candidates.length) return;
   const distanceToGranny = (candidate) => Math.hypot(candidate.x - gx, candidate.z - gz, candidate.floor === ai.floor ? 0 : UPPER_FLOOR_Y);
   const nearest = candidates.reduce((best, candidate) => distanceToGranny(candidate) < distanceToGranny(best) ? candidate : best, candidates[0]);
   let p = candidates.find((candidate) => candidate.uid === ai.targetUid) || nearest;
@@ -2197,7 +2306,7 @@ function updateGranny(dt) {
     dom.damageFlash.classList.add('on');
     damageTimer = 0.4;
   }
-  if (ai.state === 'attack' && ai.timeInState > 0.82 && !game.deathSequence && (!game.online || p.uid === 'local' || p.uid === game.online.uid)) beginJumpscare();
+  if (ai.state === 'attack' && ai.timeInState > 0.82 && !game.deathSequence && !game.observer && (!game.online || p.uid === 'local' || p.uid === game.online.uid)) beginJumpscare();
 
   if (granny.walkAction) {
     if (ai.state === 'attack') {
@@ -2276,6 +2385,7 @@ function updateGame(dt) {
   updatePlayer(dt);
   updateTraps(dt);
   updateRemotePlayers(dt);
+  if (game.observer) updateObserverCamera(dt);
   publishOnlinePlayer(dt);
   updateDoors(dt);
   const exitDoor = doors.find((door) => door.exit);
@@ -2356,7 +2466,10 @@ function resumeGame() {
   game.paused = false;
   dom.pause.classList.add('hidden');
   startAudio();
-  if (!mobileDevice) dom.canvas.requestPointerLock?.();
+  // У наблюдателя камера ведёт себя автоматически — pointer lock не нужен.
+  if (shouldUsePointerLock() && !game.observer) {
+    try { dom.canvas.requestPointerLock?.(); } catch { /* Safari и прочие неподдерживающие браузеры — вращение мыши */ }
+  }
 }
 
 const ONLINE_CONNECT_TIMEOUT_MS = 9000;
@@ -2413,13 +2526,16 @@ async function startGame() {
   game.cameraPitch = game.targetPitch = 0;
   game.finished = false;
   game.paused = false;
+  game.observer = false;
+  game.watchingUid = null;
+  hideObserverStatus();
   placeGrannyAtRandomSpawn();
   camera.position.set(game.player.x, game.player.height, game.player.z);
   camera.rotation.set(0, 0, 0, 'YXZ');
 
   if (game.online) {
     const colorHex = Number.parseInt(game.online.profile.color.slice(1), 16);
-    game.localAvatar = createPlayerAvatar(game.online.uid, Number.isFinite(colorHex) ? colorHex : PLAYER_COLORS[slot]);
+    game.localAvatar = createPlayerAvatar(game.online.uid, Number.isFinite(colorHex) ? colorHex : PLAYER_COLORS[slot], false);
     receiveOnlinePlayers(game.online.players || {});
     game.online.publish({ x: game.player.x, z: game.player.z, floor: 0, floorY: 0, yaw: 0, pitch: 0, crouched: false }).catch(() => {});
   } else {
@@ -2437,7 +2553,9 @@ async function startGame() {
     updateMobileOrientation();
   }
   startAudio();
-  if (!mobileDevice) dom.canvas.requestPointerLock?.();
+  if (shouldUsePointerLock()) {
+    try { dom.canvas.requestPointerLock?.(); } catch { /* браузер не поддерживает pointer lock — вращение мыши */ }
+  }
 }
 
 function restartGame() {
@@ -2484,11 +2602,24 @@ function setupMouseLook() {
       game.lastMouseX = event.clientX;
       game.lastMouseY = event.clientY;
       dom.canvas.setPointerCapture?.(event.pointerId);
-      dom.canvas.requestPointerLock?.();
+      if (shouldUsePointerLock()) {
+        try { dom.canvas.requestPointerLock?.(); } catch { /* вращение мыши */ }
+      }
     }
   });
   window.addEventListener('pointerup', () => { game.mouseDrag = false; });
+  window.addEventListener('pointercancel', () => { game.mouseDrag = false; });
   window.addEventListener('pointermove', onMouseMove);
+  // Safari и браузеры без поддержки: pointer lock отклоняется — падаем на drag-look.
+  document.addEventListener('pointerlockerror', () => {
+    game.pointerLockUnsupported = true;
+    console.info('Pointer lock не поддерживается/отклонён — вращение камеры мышем.');
+  });
+  document.addEventListener('pointerlockchange', () => {
+    if (!document.pointerLockElement && game.started && !game.paused && !game.finished && !mobileDevice) {
+      game.mouseDrag = false;
+    }
+  });
 }
 
 function setupJoystick(element) {
