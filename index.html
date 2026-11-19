@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#141915" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23141915'/%3E%3Cpath d='M8 25V7h3l10 12V7h3v18h-3L11 13v12z' fill='%23d86a4e'/%3E%3C/svg%3E" />
+  <meta name="description" content="Тихий дом — браузерный 3D survival-horror прототип." />
+  <title>The Quiet Home — 3D Horror</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <script type="importmap">
+    { "imports": { "three": "./vendor/three.module.js", "three/addons/": "./vendor/addons/" } }
+  </script>
+</head>
+<body>
+  <main id="app">
+    <canvas id="gameCanvas" aria-label="3D игра Тихий дом"></canvas>
+    <div class="screen-vignette" aria-hidden="true"></div>
+
+    <section id="loadingScreen" class="loading-screen">
+      <div class="loading-mark"><span></span><span></span><span></span></div>
+      <p class="eyebrow">ЗАГРУЗКА ИГРОВОГО МИРА</p>
+      <div class="loading-track"><i id="loadingFill"></i></div>
+      <p id="loadingStatus" class="loading-status">Готовим дом…</p>
+    </section>
+
+    <section id="startScreen" class="screen start-screen hidden" aria-label="Главное меню">
+      <div class="menu-glow"></div>
+      <div class="menu-content">
+        <h1 class="menu-title" aria-label="The Quiet Home">The Quiet <br /><em>Home</em></h1>
+        <button id="startButton" class="primary-button"><span>ИГРАТЬ</span><b>↗</b></button>
+      </div>
+    </section>
+
+    <section id="pauseScreen" class="screen modal-screen hidden" aria-label="Пауза">
+      <div class="modal-card">
+        <p class="eyebrow">ПЕРЕДЫШКА</p><h2>ПАУЗА</h2>
+        <button id="resumeButton" class="primary-button"><span>ПРОДОЛЖИТЬ</span><b>↗</b></button>
+        <button id="restartButton" class="secondary-button">НАЧАТЬ ЗАНОВО</button>
+        <p class="modal-foot">ESC — продолжить</p>
+      </div>
+    </section>
+
+    <section id="jumpscareScreen" class="jumpscare-screen hidden" aria-hidden="true">
+      <div class="scare-vignette"></div>
+    </section>
+
+    <section id="deathScreen" class="screen modal-screen hidden" aria-label="Поймали">
+      <div class="modal-card danger-card">
+        <p class="eyebrow">ОНА ДОГНАЛА</p><h2>ИГРА<br /><em>ОКОНЧЕНА</em></h2>
+        <button id="retryButton" class="primary-button"><span>ПОВТОР</span><b>↗</b></button>
+      </div>
+    </section>
+
+    <section id="winScreen" class="screen modal-screen hidden" aria-label="Победа">
+      <div class="modal-card win-card">
+        <p class="eyebrow">СВОБОДА</p><h2>ТЫ<br /><em>ВЫБРАЛСЯ</em></h2>
+        <button id="playAgainButton" class="primary-button"><span>СЫГРАТЬ ЕЩЁ РАЗ</span><b>↗</b></button>
+      </div>
+    </section>
+
+    <section id="hud" class="hud hidden" aria-live="polite">
+      <div class="objective-card" aria-live="polite">
+        <p class="eyebrow">ЗАДАЧИ</p>
+        <div class="objective-history" id="objectiveHistory" aria-hidden="true"></div>
+        <div class="objective-current" id="objectiveCurrent">
+          <span class="objective-marker"></span>
+          <strong id="objectiveText">НАЙДИ КЛЮЧ ОТ ВЫХОДА</strong>
+        </div>
+      </div>
+      <div id="onlineStatus" class="online-status hidden" aria-live="polite"></div>
+      <button id="pauseButton" class="pause-button" aria-label="Пауза"><span></span><span></span></button>
+      <div class="stamina-panel" aria-label="Выносливость">
+        <span>ВЫНОСЛИВОСТЬ</span>
+        <div class="stamina-track"><i id="staminaFill"></i></div>
+      </div>
+      <div id="crosshair" class="crosshair" aria-hidden="true"><i></i></div>
+      <div id="interactPrompt" class="interact-prompt hidden" aria-live="polite">
+        <div class="key-ring"><b>E</b></div><span id="interactLabel">ДЕЙСТВИЕ</span>
+      </div>
+      <div id="damageFlash" class="damage-flash"></div>
+      <div id="trapNotice" class="trap-notice hidden" role="status" aria-live="assertive">КАПКАН ЗАДЕЛ ТЕБЯ — ВЫРЫВАЙСЯ</div>
+    </section>
+
+    <section id="mobileControls" class="mobile-controls hidden" aria-label="Сенсорное управление">
+      <div class="mobile-stick move-stick" id="moveStick" aria-label="Движение">
+        <div class="stick-label">ХОДЬБА</div><div class="stick-ring"><i class="stick-knob"></i></div>
+      </div>
+      <div class="mobile-look-surface" id="lookSurface" aria-label="Проведите пальцем по правой части экрана, чтобы осмотреться">
+        <span class="look-hint">СВАЙП — ОБЗОР</span>
+      </div>
+      <div class="mobile-actions">
+        <button id="mobileCrouchButton" class="mobile-action small-action" aria-label="Присесть"><span>⌄</span><small>ТИШЕ</small></button>
+        <button id="mobileRunButton" class="mobile-action small-action" aria-label="Бежать"><span>»</span><small>БЕГ</small></button>
+        <button id="mobileInteractButton" class="mobile-action interact-action" aria-label="Действие"><b>E</b><small>ДЕЙСТВИЕ</small></button>
+      </div>
+    </section>
+
+    <section id="rotateNotice" class="rotate-notice hidden" aria-live="polite" aria-label="Поверните телефон горизонтально">
+      <div class="rotate-card">
+        <svg class="rotate-phone" viewBox="0 0 84 84" aria-hidden="true">
+          <rect x="28" y="10" width="28" height="54" rx="5"></rect>
+          <circle cx="42" cy="56" r="2"></circle>
+          <path d="M17 37a27 27 0 0 1 40-20M67 47a27 27 0 0 1-40 20"></path>
+          <path d="m52 13 7 4-1 8M32 68l-7-4 1-8"></path>
+        </svg>
+        <p class="eyebrow">УПРАВЛЕНИЕ ДЛЯ ТЕЛЕФОНА</p>
+        <strong>ПОВЕРНИТЕ ЭКРАН<br />ГОРИЗОНТАЛЬНО</strong>
+        <span>Слева — движение. Справа — ведите пальцем, чтобы осмотреться.</span>
+      </div>
+    </section>
+
+    <div id="errorScreen" class="error-screen hidden">
+      <div class="modal-card"><p class="eyebrow">ОШИБКА ЗАПУСКА</p><h2>НЕ УДАЛОСЬ<br />ОТКРЫТЬ 3D</h2><p id="errorText" class="modal-copy">Проверьте поддержку WebGL.</p></div>
+    </div>
+  </main>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
