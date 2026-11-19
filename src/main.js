@@ -13,7 +13,7 @@ const dom = {
   jumpscareScreen: $('jumpscareScreen'),
   hud: $('hud'), crosshair: $('crosshair'), interactPrompt: $('interactPrompt'), interactLabel: $('interactLabel'),
   objectiveText: $('objectiveText'), staminaFill: $('staminaFill'), damageFlash: $('damageFlash'),
-  mobileControls: $('mobileControls'), rotateNotice: $('rotateNotice'), moveStick: $('moveStick'), lookSurface: $('lookSurface'), mobileCrouchButton: $('mobileCrouchButton'), mobileRunButton: $('mobileRunButton'), mobileInteractButton: $('mobileInteractButton'),
+  mobileControls: $('mobileControls'), rotateNotice: $('rotateNotice'), moveStick: $('moveStick'), lookStick: $('lookStick'), mobileCrouchButton: $('mobileCrouchButton'), mobileRunButton: $('mobileRunButton'), mobileInteractButton: $('mobileInteractButton'),
 };
 
 const mobileDevice = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0 || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -82,6 +82,7 @@ const game = {
   targetPitch: 0,
   mobileMove: { x: 0, y: 0 },
   mobileSprint: false,
+  lookStick: { active: false, x: 0, y: 0 },
   audioEnabled: true,
   audioStarted: false,
   noise: { x: 0, z: 0, floor: 0, timer: 0, level: 0 },
@@ -2008,6 +2009,7 @@ function beginJumpscare(asObserver = false) {
   game.paused = true;
   dom.hud.classList.add('hidden');
   dom.mobileControls.classList.add('hidden');
+  dom.lookStick.classList.add('hidden');
   dom.jumpscareScreen.classList.remove('hidden');
   dom.jumpscareScreen.classList.add('active');
   dom.jumpscareScreen.setAttribute('aria-hidden', 'false');
@@ -2056,6 +2058,7 @@ function enterObserverMode() {
   game.paused = false;
   if (document.pointerLockElement) document.exitPointerLock?.();
   game.mouseDrag = false;
+  dom.lookStick.classList.add('hidden');
   // Сообщаем остальным, что этот игрок пойман — его больше не преследует бабка.
   if (game.online?.publish) game.online.publish({ caught: true, alive: false }).catch(() => {});
   showObserverStatus('НАБЛЮДЕНИЕ · Смотрите за остальными');
@@ -2368,6 +2371,7 @@ function finishGame() {
   game.finished = true;
   game.paused = true;
   dom.win.classList.remove('hidden');
+  dom.lookStick.classList.add('hidden');
   if (document.pointerLockElement) document.exitPointerLock?.();
 }
 
@@ -2382,6 +2386,13 @@ function updateSoundMood(dt) {
 }
 
 function updateGame(dt) {
+  // Джойстик обзора: удержание отклонённого джойстика даёт устойчивый поворот
+  // камеры (работает без pointer lock — стабильно в Safari и на десктопе).
+  if (game.lookStick.active && !game.observer) {
+    game.targetYaw -= game.lookStick.x * LOOK_STICK_RATE * dt;
+    game.targetPitch -= game.lookStick.y * LOOK_STICK_RATE * dt;
+    game.targetPitch = THREE.MathUtils.clamp(game.targetPitch, -1.33, 1.2);
+  }
   updatePlayer(dt);
   updateTraps(dt);
   updateRemotePlayers(dt);
@@ -2458,6 +2469,7 @@ function showPause() {
   if (!game.started || game.finished) return;
   game.paused = true;
   dom.pause.classList.remove('hidden');
+  dom.lookStick.classList.add('hidden');
   if (document.pointerLockElement) document.exitPointerLock?.();
 }
 
@@ -2465,6 +2477,7 @@ function resumeGame() {
   if (game.finished) return;
   game.paused = false;
   dom.pause.classList.add('hidden');
+  dom.lookStick.classList.remove('hidden');
   startAudio();
   // У наблюдателя камера ведёт себя автоматически — pointer lock не нужен.
   if (shouldUsePointerLock() && !game.observer) {
@@ -2547,6 +2560,7 @@ async function startGame() {
   dom.start.classList.add('hidden');
   dom.hud.classList.remove('hidden');
   if (onlineError && !game.online) showOnlineError(onlineError);
+  dom.lookStick.classList.remove('hidden');
   if (mobileDevice) {
     dom.mobileControls.classList.remove('hidden');
     requestLandscapeOrientation();
@@ -2663,29 +2677,53 @@ function setupJoystick(element) {
   element.addEventListener('lostpointercapture', reset);
 }
 
-function setupTouchLook(surface) {
-  if (!surface) return;
-  let pointerId = null, lastX = 0, lastY = 0;
-  const reset = () => { pointerId = null; };
-  surface.addEventListener('pointerdown', (event) => {
-    if (!mobileDevice || !game.started || game.paused || game.finished) return;
+// Джойстик обзора (поворот камеры) справа. Работает на всех платформах — мышь,
+// тач и перьевая ввод: хватаем джойстик и двигаем — камера поворачивается.
+// Это не зависит от pointer lock, поэтому в Safari и на десктопе вращение
+// работает стабильно (без «срыва» окна).
+const LOOK_STICK_RATE = 2.4; // радиан в секунду на полное отклонение джойстика
+
+function setupLookJoystick(element) {
+  if (!element) return;
+  const knob = element.querySelector('.stick-knob');
+  let pointerId = null, centerX = 0, centerY = 0;
+  const reset = () => {
+    pointerId = null;
+    element.classList.remove('active');
+    if (knob) knob.style.transform = 'translate(-50%,-50%)';
+    game.lookStick = { active: false, x: 0, y: 0 };
+  };
+  const apply = (clientX, clientY) => {
+    const rect = element.getBoundingClientRect();
+    const max = rect.width * 0.29;
+    let dx = clientX - centerX, dy = clientY - centerY;
+    const mag = Math.hypot(dx, dy);
+    if (mag > max) { dx *= max / mag; dy *= max / mag; }
+    // x: вправо — поворот вправо, y: вниз — наклон вниз (так же, как мышь и свайп).
+    game.lookStick.x = dx / max;
+    game.lookStick.y = dy / max;
+    if (knob) knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+  };
+  element.addEventListener('pointerdown', (event) => {
+    if (!game.started || game.paused || game.finished || game.observer) return;
     event.preventDefault();
     pointerId = event.pointerId;
-    lastX = event.clientX; lastY = event.clientY;
-    surface.setPointerCapture?.(pointerId);
+    element.setPointerCapture?.(pointerId);
+    element.classList.add('active');
+    const rect = element.getBoundingClientRect();
+    centerX = rect.left + rect.width / 2;
+    centerY = rect.top + rect.height / 2;
+    game.lookStick = { active: true, x: 0, y: 0 };
+    apply(event.clientX, event.clientY);
   });
-  surface.addEventListener('pointermove', (event) => {
+  element.addEventListener('pointermove', (event) => {
     if (pointerId !== event.pointerId || !game.started || game.paused || game.finished) return;
     event.preventDefault();
-    const dx = event.clientX - lastX, dy = event.clientY - lastY;
-    game.targetYaw -= dx * 0.0068;
-    game.targetPitch -= dy * 0.0052;
-    game.targetPitch = THREE.MathUtils.clamp(game.targetPitch, -1.28, 1.17);
-    lastX = event.clientX; lastY = event.clientY;
+    apply(event.clientX, event.clientY);
   });
-  surface.addEventListener('pointerup', (event) => { if (pointerId === event.pointerId) reset(); });
-  surface.addEventListener('pointercancel', (event) => { if (pointerId === event.pointerId) reset(); });
-  surface.addEventListener('lostpointercapture', reset);
+  element.addEventListener('pointerup', (event) => { if (pointerId === event.pointerId) reset(); });
+  element.addEventListener('pointercancel', (event) => { if (pointerId === event.pointerId) reset(); });
+  element.addEventListener('lostpointercapture', reset);
 }
 
 function updateMobileOrientation() {
@@ -2708,7 +2746,6 @@ function setupMobileControls() {
   if (!mobileDevice) return;
   dom.mobileControls.classList.add('mobile-device');
   setupJoystick(dom.moveStick);
-  setupTouchLook(dom.lookSurface);
   updateMobileOrientation();
   window.addEventListener('resize', updateMobileOrientation);
   dom.mobileInteractButton.addEventListener('pointerdown', (event) => { event.preventDefault(); doInteract(); });
@@ -2729,11 +2766,12 @@ function setupUI() {
   dom.playAgainButton.addEventListener('click', restartGame);
   window.addEventListener('keydown', onKeyDown, { passive: false });
   window.addEventListener('keyup', onKeyUp);
-  window.addEventListener('blur', () => { game.keys.clear(); game.mobileSprint = false; game.mobileMove = { x: 0, y: 0 }; });
+  window.addEventListener('blur', () => { game.keys.clear(); game.mobileSprint = false; game.mobileMove = { x: 0, y: 0 }; game.lookStick = { active: false, x: 0, y: 0 }; });
   document.addEventListener('visibilitychange', () => {
     if (document.hidden && game.started && !game.paused && !game.finished) showPause();
   });
   setupMouseLook();
+  setupLookJoystick(dom.lookStick);
   setupMobileControls();
   window.addEventListener('resize', onResize);
 }

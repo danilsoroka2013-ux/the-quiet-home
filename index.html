@@ -87,15 +87,17 @@
       <div class="mobile-stick move-stick" id="moveStick" aria-label="Движение">
         <div class="stick-label">ХОДЬБА</div><div class="stick-ring"><i class="stick-knob"></i></div>
       </div>
-      <div class="mobile-look-surface" id="lookSurface" aria-label="Проведите пальцем по правой части экрана, чтобы осмотреться">
-        <span class="look-hint">СВАЙП — ОБЗОР</span>
-      </div>
       <div class="mobile-actions">
         <button id="mobileCrouchButton" class="mobile-action small-action" aria-label="Присесть"><span>⌄</span><small>ТИШЕ</small></button>
         <button id="mobileRunButton" class="mobile-action small-action" aria-label="Бежать"><span>»</span><small>БЕГ</small></button>
         <button id="mobileInteractButton" class="mobile-action interact-action" aria-label="Действие"><b>E</b><small>ДЕЙСТВИЕ</small></button>
       </div>
     </section>
+
+    <!-- Джойстик обзора (поворот камеры) — работает на всех платформах, включая десктоп и Safari. -->
+    <div id="lookStick" class="mobile-stick look-stick hidden" aria-label="Обзор: удерживайте и двигайте для поворота камеры">
+      <div class="stick-label">ОБЗОР</div><div class="stick-ring"><i class="stick-knob"></i></div>
+    </div>
 
     <section id="rotateNotice" class="rotate-notice hidden" aria-live="polite" aria-label="Поверните телефон горизонтально">
       <div class="rotate-card">
