@@ -1,5 +1,7 @@
 // Firebase Web App configuration (Firebase Console → Project settings → Your apps).
-// This client config is public by design; protect the database with Realtime Database Rules.
+// This client config is public by design; protect the database with Realtime Database Rules
+// (see database.rules.json and the Firebase checklist in DEPLOY.md). The apiKey is NOT a secret:
+// GitHub secret-scanning alerts about it are expected for Firebase web apps — do not revoke it.
 export const firebaseConfig = {
   apiKey: 'AIzaSyBcGdmLkXvKB_osfAT85Ndbk_3LpGJKgUA',
   authDomain: 'the-quiet-home.firebaseapp.com',

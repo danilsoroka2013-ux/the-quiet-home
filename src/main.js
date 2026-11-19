@@ -670,6 +670,25 @@ function createPlayerAvatar(uid, color = PLAYER_COLORS[0]) {
   return root;
 }
 
+let onlineStatusTimer = 0;
+
+function showOnlineError(message) {
+  if (!dom.onlineStatus) return;
+  dom.onlineStatus.textContent = `ОНЛАЙН НЕДОСТУПЕН — ${message}`;
+  dom.onlineStatus.classList.add('error');
+  dom.onlineStatus.classList.remove('hidden');
+  clearTimeout(onlineStatusTimer);
+  onlineStatusTimer = setTimeout(() => {
+    dom.onlineStatus.classList.add('hidden');
+    dom.onlineStatus.classList.remove('error');
+  }, 15000);
+}
+
+function receiveOnlineError(message) {
+  console.error('Онлайн:', message);
+  showOnlineError(message);
+}
+
 function receiveOnlinePlayers(players) {
   if (!game.online) return;
   const active = new Set();
@@ -696,9 +715,10 @@ function receiveOnlinePlayers(players) {
     if (!active.has(uid)) { scene.remove(remote.root); game.remotePlayers.delete(uid); }
   }
   if (dom.onlineStatus && game.online) {
+    clearTimeout(onlineStatusTimer);
     const count = Math.min(4, 1 + game.remotePlayers.size);
     dom.onlineStatus.textContent = `ОНЛАЙН · ${count}/4`;
-    dom.onlineStatus.classList.remove('hidden');
+    dom.onlineStatus.classList.remove('hidden', 'error');
   }
 }
 
@@ -2339,6 +2359,19 @@ function resumeGame() {
   if (!mobileDevice) dom.canvas.requestPointerLock?.();
 }
 
+const ONLINE_CONNECT_TIMEOUT_MS = 9000;
+
+function withTimeout(promise, ms, onTimeout) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const error = new Error('Firebase connect timed out');
+      error.userMessage = onTimeout;
+      reject(error);
+    }, ms);
+    promise.then((value) => { clearTimeout(timer); resolve(value); }, (error) => { clearTimeout(timer); reject(error); });
+  });
+}
+
 async function startGame() {
   if (game.started || game.connecting) return;
   game.connecting = true;
@@ -2350,11 +2383,17 @@ async function startGame() {
   }
 
   let connection = null;
+  let onlineError = null;
   if (isFirebaseConfigured()) {
     try {
-      connection = await connectToQuickGame({ displayName: 'Игрок' }, receiveOnlinePlayers, receiveOnlineWorld, receiveOnlineHost);
+      connection = await withTimeout(
+        connectToQuickGame({ displayName: 'Игрок' }, receiveOnlinePlayers, receiveOnlineWorld, receiveOnlineHost, receiveOnlineError),
+        ONLINE_CONNECT_TIMEOUT_MS,
+        'Сервер не отвечает (тайм-аут 9 с). Проверьте интернет и блокировщики.',
+      );
     } catch (error) {
-      console.warn('Firebase пока недоступен; запускаем одиночную игру:', error);
+      onlineError = error?.userMessage || error?.message || 'Не удалось подключиться к мультиплееру.';
+      console.error('Онлайн недоступен; запускаем одиночную игру:', error);
     }
   }
 
@@ -2391,6 +2430,7 @@ async function startGame() {
   if (game.online && game.online.hostId === game.online.uid) publishWorldSnapshot();
   dom.start.classList.add('hidden');
   dom.hud.classList.remove('hidden');
+  if (onlineError && !game.online) showOnlineError(onlineError);
   if (mobileDevice) {
     dom.mobileControls.classList.remove('hidden');
     requestLandscapeOrientation();
