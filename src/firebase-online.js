@@ -152,7 +152,7 @@ export async function connectToQuickGame(profile = {}, onPlayers = () => {}, onW
       connected: true,
       publish: (state) => dbSdk.update(playerRef, { ...state, lastUpdated: dbSdk.serverTimestamp() }),
       publishWorld: (patch) => dbSdk.update(worldRef, patch),
-      startMatch: () => dbSdk.update(startRef, Date.now()),
+      startMatch: () => dbSdk.set(startRef, Date.now()),
       leave: async () => {
         unsubscribePlayers(); unsubscribeWorld(); unsubscribeHost(); unsubscribeStart();
         await dbSdk.remove(playerRef);
