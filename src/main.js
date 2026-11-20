@@ -887,6 +887,9 @@ function receiveOnlinePlayers(players) {
       beginJumpscare();
     }
   }
+  // Актуальный ростер — лобби (и хост) показывают именно его, а не ставший
+  // при подключении каркас игроков.
+  if (game.online) game.online.players = players;
   for (const [uid, remote] of game.remotePlayers) {
     if (!active.has(uid)) { scene.remove(remote.root); game.remotePlayers.delete(uid); }
   }
@@ -911,6 +914,14 @@ function receiveOnlineHost(hostId) {
   const wasHost = game.online.hostId === game.online.uid;
   game.online.hostId = hostId;
   if (!wasHost && hostId === game.online.uid && game.started) publishWorldSnapshot();
+}
+
+// Хосту запустил матч — все клиенты получают сигнал и стартуют игру.
+// Стартуем только если сейчас в лобби: иначе при перезагрузке в заново используемой
+// комнате оставшееся значение startedAt запустит матч, минуя лобби.
+function receiveOnlineStart() {
+  if (!game.online || game.started || game.finished || !game.lobby) return;
+  beginMatch();
 }
 
 function applySharedWorld(world) {
@@ -1322,29 +1333,32 @@ function furnishHouse() {
 
   // --- 1-й этаж ---
   // Задняя левая комната (x:-10..-2, z:-10..-6.3): кровать и тумбочка у задней стены.
-  placeProp('bedDouble', -6.2, 0, -9.3, 0, 2.1, true, 0);
-  addSearchContainer('sideTable', -3.4, 0, -9.25, 0, 2.15, 'ОБЫСКАТЬ ТУМБОЧКУ', 0);
+  // Тумбочка сдвинута от коридорной стены x=-2, чтобы не заезжать в коридоры.
+  placeProp('bedDouble', -6.4, 0, -9.3, 0, 2.1, true, 0);
+  addSearchContainer('sideTable', -5.5, 0, -9.2, 0, 2.15, 'ОБЫСКАТЬ ТУМБОЧКУ', 0);
   // Средняя левая комната (x:-10..-2, z:-6.3..5.8): диван у левой стены.
   placeProp('loungeSofa', -8.9, 0, -0.5, Math.PI / 2, 2.0, true, 0);
-  // Передняя левая комната (x:-10..-2, z:5.8..10): кухня вдоль передней стены.
-  placeProp('kitchenFridge', -8.7, 0, 9.1, 0, 1.85, true, 0);
-  placeProp('kitchenSink', -5.5, 0, 9.1, 0, 1.9, true, 0);
-  addSearchContainer('kitchenCabinet', -2.9, 0, 9.1, 0, 1.85, 'ОБЫСКАТЬ КУХОННЫЙ ШКАФ', 0);
-  // Задняя правая комната (x:2..10, z:-10..-6.3): диван у правой стены.
-  placeProp('loungeSofa', 8.9, 0, -8.0, -Math.PI / 2, 2.0, true, 0);
+  // Передняя левая комната (x:-10..-2, z:5.8..10): кухня вдоль передней стены,
+  // сдвинута от коридорной стены x=-2 и проёма z=7.9.
+  placeProp('kitchenFridge', -8.5, 0, 9.1, 0, 1.85, true, 0);
+  placeProp('kitchenSink', -6.2, 0, 9.1, 0, 1.9, true, 0);
+  addSearchContainer('kitchenCabinet', -4.2, 0, 9.1, 0, 1.85, 'ОБЫСКАТЬ КУХОННЫЙ ШКАФ', 0);
+  // Задняя правая комната (x:2..10, z:-10..-6.3): диван у правой стены,
+  // подальше от проёма z=-7.9.
+  placeProp('loungeSofa', 8.9, 0, -9.0, -Math.PI / 2, 2.0, true, 0);
   // Средняя правая комната (x:2..10, z:-6.3..5.8): sink у правой стены.
   placeProp('bathroomSink', 9.0, 0, 0.5, Math.PI, 1.85, true, 0);
   // Передняя правая комната (x:2..10, z:5.8..10): комод у правой стены.
   addSearchContainer('cabinetBedDrawer', 8.9, 0, 8.6, Math.PI, 1.9, 'ОБЫСКАТЬ ЯЩИКИ', 0);
 
   // --- 2-й этаж ---
-  placeProp('bedDouble', -6.2, UPPER_FLOOR_Y, -9.3, 0, 1.95, true, 1);
-  addSearchContainer('sideTable', -3.4, UPPER_FLOOR_Y, -9.25, 0, 2.0, 'ОБЫСКАТЬ ТУМБОЧКУ · 2 ЭТАЖ', 1);
+  placeProp('bedDouble', -6.4, UPPER_FLOOR_Y, -9.3, 0, 1.95, true, 1);
+  addSearchContainer('sideTable', -5.5, UPPER_FLOOR_Y, -9.2, 0, 2.0, 'ОБЫСКАТЬ ТУМБОЧКУ · 2 ЭТАЖ', 1);
   placeProp('loungeSofa', -8.9, UPPER_FLOOR_Y, -0.5, Math.PI / 2, 1.9, true, 1);
   addSearchContainer('cabinetBedDrawer', 8.9, UPPER_FLOOR_Y, -8.6, Math.PI, 1.9, 'ОБЫСКАТЬ КОМОД · 2 ЭТАЖ', 1);
-  placeProp('kitchenFridge', -8.7, UPPER_FLOOR_Y, 9.1, 0, 1.75, true, 1);
-  placeProp('kitchenSink', -5.5, UPPER_FLOOR_Y, 9.1, 0, 1.8, true, 1);
-  addSearchContainer('kitchenCabinet', -2.9, UPPER_FLOOR_Y, 9.1, 0, 1.8, 'ОБЫСКАТЬ ШКАФ · 2 ЭТАЖ', 1);
+  placeProp('kitchenFridge', -8.5, UPPER_FLOOR_Y, 9.1, 0, 1.75, true, 1);
+  placeProp('kitchenSink', -6.2, UPPER_FLOOR_Y, 9.1, 0, 1.8, true, 1);
+  addSearchContainer('kitchenCabinet', -4.2, UPPER_FLOOR_Y, 9.1, 0, 1.8, 'ОБЫСКАТЬ ШКАФ · 2 ЭТАЖ', 1);
   placeProp('bathroomSink', 9.0, UPPER_FLOOR_Y, 0.5, Math.PI, 1.8, true, 1);
   addSearchContainer('sideTable', 8.9, UPPER_FLOOR_Y, 8.6, Math.PI, 1.9, 'ОБЫСКАТЬ ЯЩИК · 2 ЭТАЖ', 1);
 
@@ -2825,7 +2839,7 @@ async function startGame() {
   if (isFirebaseConfigured()) {
     try {
       connection = await withTimeout(
-        connectToQuickGame({ displayName: game.settings.nickname }, receiveOnlinePlayers, receiveOnlineWorld, receiveOnlineHost, receiveOnlineError),
+        connectToQuickGame({ displayName: game.settings.nickname }, receiveOnlinePlayers, receiveOnlineWorld, receiveOnlineHost, receiveOnlineStart, receiveOnlineError),
         ONLINE_CONNECT_TIMEOUT_MS,
         'Сервер не отвечает (тайм-аут 9 с). Проверьте интернет и блокировщики.',
       );
@@ -2942,6 +2956,8 @@ function showLobby() {
 
 function lobbyStartMatch() {
   if (!isHost() || !game.lobby) return;
+  // Отправляем сигнал начала матча — все клиенты получат его и запустят beginMatch().
+  if (game.online?.startMatch) game.online.startMatch().catch(() => {});
   beginMatch();
 }
 
