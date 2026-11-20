@@ -3249,12 +3249,15 @@ async function init() {
 }
 
 // Глобальные перехватчики — чтобы любая непойманная ошибка тоже отображалась на экране,
-// а не просто висла чёрным экраном.
+// а не просто висла чёрным экраном. Только до запуска игры — после старта ошибки
+// не критичны и перекрывать экран не стоит.
 window.addEventListener('error', (event) => {
+  if (game.started || game.finished) return;
   const msg = event.error?.message || event.message || 'неизвестная ошибка';
   showError('Ошибка при запуске: ' + msg);
 });
 window.addEventListener('unhandledrejection', (event) => {
+  if (game.started || game.finished) return;
   const reason = event.reason;
   const msg = (reason && (reason.message || String(reason))) || 'неизвестная ошибка';
   showError('Ошибка при запуске: ' + msg);
