@@ -47,7 +47,7 @@ async function loadFirebaseSdk() {
   return sdkPromise;
 }
 
-export async function connectToQuickGame(profile = {}, onPlayers = () => {}, onWorld = () => {}, onHost = () => {}, onError = () => {}) {
+export async function connectToQuickGame(profile = {}, onPlayers = () => {}, onWorld = () => {}, onHost = () => {}, onStart = () => {}, onError = () => {}) {
   if (!isFirebaseConfigured()) return null;
   const report = (error, context) => {
     const message = describeFirebaseError(error);
@@ -135,6 +135,12 @@ export async function connectToQuickGame(profile = {}, onPlayers = () => {}, onW
       onHost(currentHostId);
     }, (error) => report(error, 'host'));
 
+    // Сигнал начала матча: хост пишет startedAt, остальные получают и стартуют.
+    const startRef = dbSdk.ref(db, `rooms/${roomId}/startedAt`);
+    const unsubscribeStart = dbSdk.onValue(startRef, (snapshot) => {
+      if (snapshot.exists()) onStart(snapshot.val());
+    }, (error) => report(error, 'start'));
+
     return {
       uid,
       roomId,
@@ -146,8 +152,9 @@ export async function connectToQuickGame(profile = {}, onPlayers = () => {}, onW
       connected: true,
       publish: (state) => dbSdk.update(playerRef, { ...state, lastUpdated: dbSdk.serverTimestamp() }),
       publishWorld: (patch) => dbSdk.update(worldRef, patch),
+      startMatch: () => dbSdk.update(startRef, Date.now()),
       leave: async () => {
-        unsubscribePlayers(); unsubscribeWorld(); unsubscribeHost();
+        unsubscribePlayers(); unsubscribeWorld(); unsubscribeHost(); unsubscribeStart();
         await dbSdk.remove(playerRef);
         try {
           await dbSdk.runTransaction(roomRef, (room) => {
