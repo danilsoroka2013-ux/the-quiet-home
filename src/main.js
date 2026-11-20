@@ -8,11 +8,16 @@ const dom = {
   canvas: $('gameCanvas'),
   loading: $('loadingScreen'), loadingFill: $('loadingFill'), loadingStatus: $('loadingStatus'),
   start: $('startScreen'), pause: $('pauseScreen'), death: $('deathScreen'), win: $('winScreen'), error: $('errorScreen'), errorText: $('errorText'),
-  startButton: $('startButton'), resumeButton: $('resumeButton'), restartButton: $('restartButton'), retryButton: $('retryButton'), playAgainButton: $('playAgainButton'), pauseButton: $('pauseButton'),
-  objectiveHistory: $('objectiveHistory'), objectiveCurrent: $('objectiveCurrent'), onlineStatus: $('onlineStatus'), observerStatus: $('observerStatus'), trapNotice: $('trapNotice'),
+  startButton: $('startButton'), resumeButton: $('resumeButton'), spectateButton: $('spectateButton'), restartButton: $('restartButton'), retryButton: $('retryButton'), playAgainButton: $('playAgainButton'), pauseButton: $('pauseButton'),
+  objectiveHistory: $('objectiveHistory'), objectiveCurrent: $('objectiveCurrent'), onlineStatus: $('onlineStatus'), onlineCount: $('onlineCount'), observerStatus: $('observerStatus'), trapNotice: $('trapNotice'),
   jumpscareScreen: $('jumpscareScreen'),
   hud: $('hud'), crosshair: $('crosshair'), interactPrompt: $('interactPrompt'), interactLabel: $('interactLabel'),
   objectiveText: $('objectiveText'), staminaFill: $('staminaFill'), damageFlash: $('damageFlash'),
+  settingsButton: $('settingsButton'), settingsScreen: $('settingsScreen'), settingsCloseButton: $('settingsCloseButton'), nicknameInput: $('nicknameInput'), controlPointerButton: $('controlPointerButton'), controlJoystickButton: $('controlJoystickButton'),
+  lobbyScreen: $('lobbyScreen'), lobbyPlayers: $('lobbyPlayers'), lobbyStartButton: $('lobbyStartButton'), lobbyStatus: $('lobbyStatus'),
+  toastCenter: $('toastCenter'), toastLeft: $('toastLeft'), toastLeftText: $('toastLeftText'),
+  nameTags: $('nameTags'),
+  observerSwitch: $('observerSwitch'), observerPrevButton: $('observerPrevButton'), observerNextButton: $('observerNextButton'),
   mobileControls: $('mobileControls'), rotateNotice: $('rotateNotice'), moveStick: $('moveStick'), lookStick: $('lookStick'), mobileCrouchButton: $('mobileCrouchButton'), mobileRunButton: $('mobileRunButton'), mobileInteractButton: $('mobileInteractButton'),
 };
 
@@ -24,16 +29,71 @@ const mobileDevice = matchMedia('(pointer: coarse)').matches || navigator.maxTou
 const isSafari = /Safari/.test(navigator.userAgent) && !/Chrome|CriOS|Edg|OPR/.test(navigator.userAgent);
 
 function shouldUsePointerLock() {
+  // По выбору в настройках: Pointer Lock или Джойстик. Joystick всегда доступен
+  // как备用, но при выборе Pointer Lock на десктопе он используется по умолчанию.
+  if (game.settings.control === 'joystick') return false;
   return !mobileDevice && !isSafari && !game.pointerLockUnsupported;
+}
+
+// --- Настройки (сохраняются в localStorage) ---
+const SETTINGS_KEY = 'the-quiet-home-settings';
+
+function loadSettings() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+    if (saved.control === 'pointer' || saved.control === 'joystick') game.settings.control = saved.control;
+    if (typeof saved.nickname === 'string' && saved.nickname.trim()) game.settings.nickname = saved.nickname.trim().slice(0, 14);
+  } catch { /* некорректные данные — оставляем значения по умолчанию */ }
+}
+
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(game.settings)); } catch { /* localStorage недоступен */ }
+}
+
+function applyControlChoice() {
+  const choice = game.settings.control;
+  dom.controlPointerButton?.classList.toggle('active', choice === 'pointer');
+  dom.controlJoystickButton?.classList.toggle('active', choice === 'joystick');
+}
+
+function openSettings() {
+  dom.nicknameInput.value = game.settings.nickname;
+  applyControlChoice();
+  dom.settingsScreen.classList.remove('hidden');
+}
+
+function closeSettings() {
+  dom.settingsScreen.classList.add('hidden');
+  if (game.online) publishProfile();
+}
+
+// Джойстик обзора нужен, когда pointer lock не используется (выбор «Джойстик»,
+// Safari, тач-устройства) — иначе скрывается, чтобы не мешал pointer lock.
+function updateLookStickVisibility() {
+  const needStick = game.settings.control === 'joystick' || !shouldUsePointerLock();
+  if (game.started && !game.paused && !game.finished && !game.observer) {
+    dom.lookStick.classList.toggle('hidden', !needStick);
+  } else {
+    dom.lookStick.classList.add('hidden');
+  }
+}
+
+// Отправляем никнейм другим игрокам (отображается над головами).
+function publishProfile() {
+  if (!game.online?.publish) return;
+  game.online.publish({ displayName: game.settings.nickname, color: game.online.profile.color })
+    .catch((error) => console.debug('Firebase profile update:', error));
 }
 const MAX_DELTA = 0.05;
 const UPPER_FLOOR_Y = 3.0;
-// The flight turns 90° to the right (east) and is nudged 0.2 m toward the rear/south.
-const STAIR_BOTTOM = { x: 2.4, z: -3.8 };
-const STAIR_TOP = { x: 5.3, z: -3.8 };
-const STAIR_BOTTOM_APPROACH = { x: 3.1, z: -3.8 };
-const STAIR_TOP_APPROACH = { x: 5.75, z: -3.8 };
-const STAIR_HOLE = { minX: 2.825, maxX: 4.875, minZ: -4.545, maxZ: -3.005 };
+// Лестница повернута на 180° по горизонтали: бег ступеней идёт на запад (-x),
+// затем сдвинута немного назад. Дырка в втором этаже сделана под её верхним
+// концом, чтобы при подъёме не оставалось дырки под ногами.
+const STAIR_BOTTOM = { x: 4.7, z: -3.8 };
+const STAIR_TOP = { x: 1.8, z: -3.8 };
+const STAIR_BOTTOM_APPROACH = { x: 4.1, z: -3.8 };
+const STAIR_TOP_APPROACH = { x: 1.35, z: -3.8 };
+const STAIR_HOLE = { minX: 0.775, maxX: 2.825, minZ: -4.545, maxZ: -3.005 };
 const ROOM = { minX: -10, maxX: 10, minZ: -10, maxZ: 10, height: 3.0, wall: 0.24, doorWidth: 1.18, doorHeight: 2.18 };
 const WORLD = { minX: -19, maxX: 19, minZ: -19, maxZ: 19 };
 const EXTERIOR_ARM_END = 18;
@@ -60,6 +120,7 @@ let renderer, scene, camera, clock, listener, audioLoader, gltfLoader, fbxLoader
 let materials = {}, textures = {}, props = new Map(), trapModels = new Map(), propsReady = false, grannyReady = false;
 let granny = null, audioBuffers = {};
 let houseLights = [], wallColliders = [], worldColliders = [], doors = [], items = [], searchContainers = [];
+let flashlight = null;
 let navigationGrids = [], navigationVersion = 0, wallPaintings = [];
 const NAV_STEP = 0.5;
 const NAV_MIN = WORLD.minX + 0.5;
@@ -91,6 +152,8 @@ const game = {
   online: null, localAvatar: null, remotePlayers: new Map(), onlineSyncTimer: 0, pendingRemoteWorld: null, pendingHostId: null, remoteGrannyState: null,
   observer: false, watchingUid: null,
   pointerLockUnsupported: false,
+  lobby: false,
+  settings: { control: 'pointer', nickname: 'Игрок' },
   traps: [], trapNoticeTimer: 0,
   deathSequence: null, jumpscarePlayed: false,
 };
@@ -187,13 +250,25 @@ function setupRenderer() {
   fbxLoader.setResourcePath('./assets/models/');
   clock = new THREE.Clock();
 
-  scene.add(new THREE.AmbientLight(0xe6e1d2, 0.72));
-  const hemi = new THREE.HemisphereLight(0xe8e4d8, 0x756957, 1.05);
+  // Освещение сведено к минимуму: вместо потолочных светильников — фонарик,
+  // который ведёт себя как камера (динамика, направление обзора).
+  scene.add(new THREE.AmbientLight(0xe6e1d2, 0.1));
+  const hemi = new THREE.HemisphereLight(0xe8e4d8, 0x756957, 0.08);
   scene.add(hemi);
-  const moon = new THREE.DirectionalLight(0xd7dec6, 0.45);
+  const moon = new THREE.DirectionalLight(0xd7dec6, 0.05);
   moon.position.set(-8, 12, -6);
   moon.castShadow = false;
   scene.add(moon);
+
+  // Фонарик: spotlight прикреплён к камере и смотрит в ту же сторону, что и обзор.
+  flashlight = new THREE.SpotLight(0xfff1d0, mobileDevice ? 2.6 : 4.2, 26, 0.62, 0.45, 1.6);
+  flashlight.position.set(0, 0, 0);
+  const flashlightTarget = new THREE.Object3D();
+  flashlightTarget.position.set(0, 0, -1);
+  camera.add(flashlight);
+  camera.add(flashlightTarget);
+  flashlight.target = flashlightTarget;
+  scene.add(camera);
 
 }
 
@@ -342,24 +417,25 @@ function buildExteriorCorridors() {
     addFlatRect(width, depth, x, z, ROOM.height - 0.035, materials.ceiling);
   };
 
-  // Four covered arms pass through the old outer wall and continue well beyond the house.
-  for (const side of [-1, 1]) {
-    const zStart = side < 0 ? -outer : ROOM.maxZ;
-    const zEnd = side < 0 ? ROOM.minZ : outer;
-    const junctionZ = side * junction;
+  // North (-z) covered arm passes through the outer wall and continues beyond the house.
+  // The exit side (+z, front door) has no corridor — only the door itself remains.
+  {
+    const zStart = -outer;
+    const zEnd = ROOM.minZ;
+    const junctionZ = -junction;
     addWallX(-half, zStart, zEnd, [{ center: junctionZ, width: branch * 2 }], floorOptions);
     addWallX(half, zStart, zEnd, [{ center: junctionZ, width: branch * 2 }], floorOptions);
-    addWallZ(side * outer, -half, half, [], floorOptions);
-    addCorridorFloor(half * 2, outer - ROOM.maxZ, 0, side * (ROOM.maxZ + (outer - ROOM.maxZ) / 2));
+    addWallZ(-outer, -half, half, [], floorOptions);
+    addCorridorFloor(half * 2, outer - ROOM.maxZ, 0, -(ROOM.maxZ + (outer - ROOM.maxZ) / 2));
 
-    // Each arm forks left and right into short, enclosed dead-end branches.
+    // The arm forks left and right into short, enclosed dead-end branches.
     for (const branchSide of [-1, 1]) {
       const xStart = branchSide < 0 ? -end : half;
       const xEnd = branchSide < 0 ? -half : end;
       for (const edgeZ of [junctionZ - branch, junctionZ + branch]) {
         addWallZ(edgeZ, xStart, xEnd, [], floorOptions);
       }
-      // Leave the branch end open so the outer loop can join it.
+      // Close the branch end — it joins the outer loop through the connectors below.
       addWallX(branchSide * end, junctionZ - branch, junctionZ + branch, [{ center: junctionZ, width: branch * 2 }], floorOptions);
       const branchLength = end - half;
       addCorridorFloor(branchLength, branch * 2, branchSide * (half + branchLength / 2), junctionZ);
@@ -389,13 +465,13 @@ function buildExteriorCorridors() {
     }
   }
 
-  // Four covered L-connectors join the old branch ends into a perimeter loop.
-  // This adds real alternate routes instead of more dead-end corridors.
+  // Covered L-connectors join branch ends into a perimeter loop (north side only —
+  // the exit side stays clear). This adds alternate routes instead of dead ends.
   const connectorStart = end;
   const connectorTurn = junction - branch;
   const connectorLength = connectorTurn - connectorStart;
   for (const xSide of [-1, 1]) {
-    for (const zSide of [-1, 1]) {
+    for (const zSide of [-1]) {
       const northSouthZ = zSide * junction;
       const horizontalMinX = xSide * connectorStart < xSide * connectorTurn ? xSide * connectorStart : xSide * connectorTurn;
       const horizontalMaxX = xSide * connectorStart > xSide * connectorTurn ? xSide * connectorStart : xSide * connectorTurn;
@@ -420,14 +496,14 @@ function buildExteriorCorridors() {
   for (const x of [ROOM.minX, ROOM.maxX]) addDoorFrame({ axis: 'x', centerX: x, centerZ: 0, openingWidth: half * 2, floor: 0 });
   addDoorFrame({ axis: 'z', centerX: 0, centerZ: ROOM.minZ, openingWidth: half * 2, floor: 0 });
   for (const side of [-1, 1]) {
-    const junction = side * EXTERIOR_JUNCTION;
-    addDoorFrame({ axis: 'x', centerX: -half, centerZ: junction, openingWidth: branch * 2, floor: 0 });
-    addDoorFrame({ axis: 'x', centerX: half, centerZ: junction, openingWidth: branch * 2, floor: 0 });
-    addDoorFrame({ axis: 'z', centerX: junction, centerZ: -half, openingWidth: branch * 2, floor: 0 });
-    addDoorFrame({ axis: 'z', centerX: junction, centerZ: half, openingWidth: branch * 2, floor: 0 });
+    const junctionJ = side * EXTERIOR_JUNCTION;
+    addDoorFrame({ axis: 'x', centerX: -half, centerZ: junctionJ, openingWidth: branch * 2, floor: 0 });
+    addDoorFrame({ axis: 'x', centerX: half, centerZ: junctionJ, openingWidth: branch * 2, floor: 0 });
+    addDoorFrame({ axis: 'z', centerX: junctionJ, centerZ: -half, openingWidth: branch * 2, floor: 0 });
+    addDoorFrame({ axis: 'z', centerX: junctionJ, centerZ: half, openingWidth: branch * 2, floor: 0 });
   }
   for (const xSide of [-1, 1]) {
-    for (const zSide of [-1, 1]) {
+    for (const zSide of [-1]) {
       addDoorFrame({ axis: 'x', centerX: xSide * end, centerZ: zSide * junction, openingWidth: branch * 2, floor: 0 });
       addDoorFrame({ axis: 'z', centerX: xSide * junction, centerZ: zSide * end, openingWidth: branch * 2, floor: 0 });
     }
@@ -435,7 +511,7 @@ function buildExteriorCorridors() {
 
   const path = new THREE.Mesh(new THREE.PlaneGeometry(1.65, 7.6), new THREE.MeshStandardMaterial({ color: 0x60695a, roughness: 1 }));
   path.rotation.x = -Math.PI / 2;
-  path.position.set(0, -0.02, 14);
+  path.position.set(0, -0.02, -14);
   scene.add(path);
 }
 
@@ -500,21 +576,21 @@ function buildUpperFloor() {
 
   buildFloorLayout(1);
 
-  // Twelve open-riser treads now rise east, matching the rotated stairwell opening.
+  // Двенадцать ступеней поднимаются на запад (-x), совпадая с повернутой лестничной шахтой.
   const count = 12, treadDepth = 0.23, riser = UPPER_FLOOR_Y / count;
   const bottomX = STAIR_BOTTOM.x, stairZ = STAIR_BOTTOM.z;
   for (let i = 0; i < count; i++) {
     const topY = (i + 1) * riser;
-    const stepX = bottomX + (i + 0.5) * treadDepth;
+    const stepX = bottomX - (i + 0.5) * treadDepth;
     const tread = addMeshBox(treadDepth, 0.08, 1.16, stepX, topY - 0.04, stairZ, materials.wood, { collider: false });
     tread.name = `stair-tread-${i + 1}`;
-    const riserX = bottomX + i * treadDepth + 0.035;
+    const riserX = bottomX - i * treadDepth - 0.035;
     addMeshBox(0.07, riser, 1.16, riserX, topY - riser / 2, stairZ, materials.trim, { collider: false });
   }
-  // A compact landing at the east end joins the top step to the upstairs floor.
+  // Небольшая платформа у западного конца соединяет верхнюю ступень с вторым этажом.
   addMeshBox(0.6, 0.12, 1.5, STAIR_TOP.x, UPPER_FLOOR_Y - 0.04, STAIR_TOP.z, materials.wood, { collider: false });
-  const railStartX = bottomX - 0.1;
-  const railEndX = STAIR_TOP.x + 0.25;
+  const railStartX = bottomX + 0.1;
+  const railEndX = STAIR_TOP.x - 0.25;
   for (const railZ of [stairZ - 0.67, stairZ + 0.67]) {
     const start = new THREE.Vector3(railStartX, 0.24, railZ);
     const end = new THREE.Vector3(railEndX, UPPER_FLOOR_Y + 0.48, railZ);
@@ -540,6 +616,7 @@ function buildUpperFloor() {
 }
 
 function addCeilingLamp(x, y, z, color, intensity, distance, flicker, floor = 0) {
+  // Светильник рисуется, но реального света не даёт — освещение только от фонарика.
   const fixture = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 0.1, 8), materials.metal);
   fixture.position.set(x, y + 0.02, z);
   fixture.castShadow = false;
@@ -547,17 +624,6 @@ function addCeilingLamp(x, y, z, color, intensity, distance, flicker, floor = 0)
   const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.065, 8, 6), materials.bulb);
   bulb.position.set(x, y - 0.07, z);
   scene.add(bulb);
-  const lightsOnFloor = houseLights.filter((light) => light.userData.floor === floor).length;
-  if (lightsOnFloor < (mobileDevice ? 2 : 3)) {
-    const light = new THREE.PointLight(color, intensity, distance, 2);
-    light.position.set(x, y - 0.12, z);
-    light.userData.baseIntensity = intensity;
-    light.userData.flicker = false;
-    light.userData.floor = floor;
-    light.castShadow = false;
-    scene.add(light);
-    houseLights.push(light);
-  }
 }
 
 function buildWallDecor() {
@@ -705,6 +771,89 @@ function receiveOnlineError(message) {
   showOnlineError(message);
 }
 
+// --- Тосты ---
+function showToastCenter(message, ms = 2000) {
+  if (!dom.toastCenter) return;
+  dom.toastCenter.textContent = message;
+  dom.toastCenter.classList.remove('hidden', 'fade-out');
+  clearTimeout(toastCenterTimer);
+  toastCenterTimer = setTimeout(() => {
+    dom.toastCenter.classList.add('fade-out');
+    setTimeout(() => dom.toastCenter.classList.add('hidden'), 400);
+  }, ms);
+}
+
+function showToastLeft(message, ms = 3000) {
+  if (!dom.toastLeft) return;
+  dom.toastLeftText.textContent = message;
+  dom.toastLeft.classList.remove('hidden', 'fade-out');
+  clearTimeout(toastLeftTimer);
+  toastLeftTimer = setTimeout(() => {
+    dom.toastLeft.classList.add('fade-out');
+    setTimeout(() => dom.toastLeft.classList.add('hidden'), 400);
+  }, ms);
+}
+
+let toastCenterTimer = 0, toastLeftTimer = 0;
+
+// --- Именные Tags над головами игроков ---
+const nameTagEls = new Map(); // uid -> HTMLElement
+
+function ensureNameTag(uid, text, isLocal) {
+  let el = nameTagEls.get(uid);
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'name-tag' + (isLocal ? ' local' : '');
+    dom.nameTags.append(el);
+    nameTagEls.set(uid, el);
+  }
+  if (el.textContent !== text) el.textContent = text;
+  return el;
+}
+
+function removeNameTag(uid) {
+  const el = nameTagEls.get(uid);
+  if (el) { el.remove(); nameTagEls.delete(uid); }
+}
+
+function updateNameTags() {
+  if (!dom.nameTags) return;
+  const w = window.innerWidth, h = window.innerHeight;
+  const localUid = game.online?.uid;
+  // Локальный авата́р (если он есть).
+  if (game.localAvatar) {
+    const pos = new THREE.Vector3();
+    game.localAvatar.getWorldPosition(pos);
+    pos.y += 2.0;
+    const el = ensureNameTag(localUid, game.settings.nickname, true);
+    projectTag(el, pos, w, h);
+  }
+  for (const [uid, remote] of game.remotePlayers) {
+    if (remote.target.alive === false) continue;
+    const pos = new THREE.Vector3();
+    remote.root.getWorldPosition(pos);
+    pos.y += 2.0;
+    const name = remote.target.displayName || 'Игрок';
+    const el = ensureNameTag(uid, name, false);
+    projectTag(el, pos, w, h);
+  }
+  // Удаляем Tags для исчезнувших игроков.
+  for (const uid of [...nameTagEls.keys()]) {
+    if (uid === localUid) continue;
+    if (!game.remotePlayers.has(uid)) removeNameTag(uid);
+  }
+}
+
+function projectTag(el, worldPos, w, h) {
+  const projected = worldPos.clone().project(camera);
+  if (projected.z > 1) { el.style.display = 'none'; return; }
+  const x = (projected.x * 0.5 + 0.5) * w;
+  const y = (-projected.y * 0.5 + 0.5) * h;
+  el.style.display = 'block';
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
+}
+
 function receiveOnlinePlayers(players) {
   if (!game.online) return;
   const active = new Set();
@@ -718,6 +867,11 @@ function receiveOnlinePlayers(players) {
       const root = createPlayerAvatar(uid, color);
       remote = { root, target: root.userData.target };
       game.remotePlayers.set(uid, remote);
+      // Тост: новый игрок подключился (только если уже играем, не в лобби).
+      if (game.started && !game.lobby) {
+        const name = data.displayName || 'Игрок';
+        showToastLeft(`Подключился новый игрок: ${name}`, 3000);
+      }
     }
     remote.target.x = Number.isFinite(data.x) ? data.x : remote.target.x;
     remote.target.z = Number.isFinite(data.z) ? data.z : remote.target.z;
@@ -727,6 +881,11 @@ function receiveOnlinePlayers(players) {
     remote.target.floor = data.floor === 1 ? 1 : 0;
     remote.target.crouched = Boolean(data.crouched);
     remote.target.alive = data.alive !== false;
+    remote.target.displayName = data.displayName || remote.target.displayName || 'Игрок';
+    // Если кто-то пойман — умирают все: матч завершается для каждого клиента.
+    if (data.matchOver && !game.finished && !game.deathSequence) {
+      beginJumpscare();
+    }
   }
   for (const [uid, remote] of game.remotePlayers) {
     if (!active.has(uid)) { scene.remove(remote.root); game.remotePlayers.delete(uid); }
@@ -735,9 +894,10 @@ function receiveOnlinePlayers(players) {
     clearTimeout(onlineStatusTimer);
     // Считаем только живых (не пойманных) игроков.
     const alive = [...game.remotePlayers.values()].filter((remote) => remote.target.alive !== false).length + (game.observer ? 0 : 1);
-    dom.onlineStatus.textContent = `ОНЛАЙН · ${Math.min(4, alive)}/4`;
+    dom.onlineCount.textContent = `${Math.min(4, alive)} / 4`;
     dom.onlineStatus.classList.remove('hidden', 'error');
   }
+  if (game.lobby) renderLobby();
 }
 
 function receiveOnlineWorld(world) {
@@ -827,8 +987,18 @@ function updateRemoteGranny(dt) {
     } else if (!granny.walkAction.isRunning()) granny.walkAction.play();
   }
   granny.mixer?.update(dt);
-  const near = game.player.floor === granny.floor && Math.hypot(game.player.x - granny.root.position.x, game.player.z - granny.root.position.z) < 1.7;
+  // Пойманным нельзя стать, стоя в корточках — бабка не может убить сжатого игрока.
+  const near = game.player.floor === granny.floor && !game.player.crouched && Math.hypot(game.player.x - granny.root.position.x, game.player.z - granny.root.position.z) < 1.7;
   if (target.state === 'attack' && near && !game.deathSequence && !game.finished && !game.observer) beginJumpscare();
+  // Звуки бабки на клиентах, где она управляется хостом.
+  game.ai.soundTimer = (game.ai.soundTimer ?? 0) - dt;
+  if (game.ai.soundTimer <= 0) {
+    const close = Math.hypot(game.player.x - granny.root.position.x, game.player.z - granny.root.position.z, game.player.floor === granny.floor ? 0 : UPPER_FLOOR_Y) < 8;
+    if (game.ai.state === 'chase' || (close && game.ai.state !== 'attack')) {
+      synthGrannySound({ type: game.ai.state === 'chase' ? 'growl' : 'creak', volume: game.ai.state === 'chase' ? 0.4 : 0.22, duration: 0.7 });
+      game.ai.soundTimer = game.ai.state === 'chase' ? 2.2 + Math.random() * 1.8 : 4.5 + Math.random() * 3;
+    } else game.ai.soundTimer = 3 + Math.random() * 2;
+  }
 }
 
 function updateRemotePlayers(dt) {
@@ -1146,27 +1316,37 @@ function updateTraps(dt) {
 function furnishHouse() {
   searchContainers = [];
 
-  // Ground floor: each piece stays inside a room, well clear of the cross-corridors and door swings.
-  placeProp('bedDouble', -7.9, 0, -8.05, 0, 2.1, true, 0);
-  addSearchContainer('sideTable', -4.2, 0, -8.2, 0, 2.15, 'ОБЫСКАТЬ ТУМБОЧКУ', 0);
-  placeProp('loungeSofa', -7.9, 0, -4.75, Math.PI / 2, 2.0, true, 0);
-  placeProp('loungeSofa', 7.9, 0, -8.15, -Math.PI / 2, 2.0, true, 0);
-  placeProp('kitchenFridge', -8.4, 0, 9.0, 0, 1.85, true, 0);
-  placeProp('kitchenSink', -5.4, 0, 9.0, 0, 1.9, true, 0);
-  addSearchContainer('kitchenCabinet', -3.0, 0, 9.0, 0, 1.85, 'ОБЫСКАТЬ КУХОННЫЙ ШКАФ', 0);
-  placeProp('bathroomSink', 7.8, 0, 3.8, Math.PI, 1.85, true, 0);
-  addSearchContainer('cabinetBedDrawer', 7.8, 0, 8.05, Math.PI, 1.9, 'ОБЫСКАТЬ ЯЩИКИ', 0);
+  // Мебель расставлена по стенам: каждая вещь прижата к внешней стене или перегородке,
+  // не «разбросана» по центру комнат. Комнаты делят длинные крылья дома.
+  // Внутренние границы: стены дома x=±10 / z=±10, перегородки z=-6.3 и z=5.8.
 
-  // Upstairs receives a complete, lighter set too; the stair landing itself is kept empty.
-  placeProp('bedDouble', -7.9, UPPER_FLOOR_Y, -8.05, 0, 1.95, true, 1);
-  addSearchContainer('sideTable', -4.2, UPPER_FLOOR_Y, -8.2, 0, 2.0, 'ОБЫСКАТЬ ТУМБОЧКУ · 2 ЭТАЖ', 1);
-  placeProp('loungeSofa', -7.8, UPPER_FLOOR_Y, -4.75, Math.PI / 2, 1.9, true, 1);
-  addSearchContainer('cabinetBedDrawer', 7.8, UPPER_FLOOR_Y, -8.05, Math.PI, 1.9, 'ОБЫСКАТЬ КОМОД · 2 ЭТАЖ', 1);
-  placeProp('kitchenFridge', -8.35, UPPER_FLOOR_Y, 9.0, 0, 1.75, true, 1);
-  placeProp('kitchenSink', -5.45, UPPER_FLOOR_Y, 9.0, 0, 1.8, true, 1);
-  addSearchContainer('kitchenCabinet', -3.0, UPPER_FLOOR_Y, 9.0, 0, 1.8, 'ОБЫСКАТЬ ШКАФ · 2 ЭТАЖ', 1);
-  placeProp('bathroomSink', 7.9, UPPER_FLOOR_Y, 3.8, Math.PI, 1.8, true, 1);
-  addSearchContainer('sideTable', 7.9, UPPER_FLOOR_Y, 8.0, Math.PI, 1.9, 'ОБЫСКАТЬ ЯЩИК · 2 ЭТАЖ', 1);
+  // --- 1-й этаж ---
+  // Задняя левая комната (x:-10..-2, z:-10..-6.3): кровать и тумбочка у задней стены.
+  placeProp('bedDouble', -6.2, 0, -9.3, 0, 2.1, true, 0);
+  addSearchContainer('sideTable', -3.4, 0, -9.25, 0, 2.15, 'ОБЫСКАТЬ ТУМБОЧКУ', 0);
+  // Средняя левая комната (x:-10..-2, z:-6.3..5.8): диван у левой стены.
+  placeProp('loungeSofa', -8.9, 0, -0.5, Math.PI / 2, 2.0, true, 0);
+  // Передняя левая комната (x:-10..-2, z:5.8..10): кухня вдоль передней стены.
+  placeProp('kitchenFridge', -8.7, 0, 9.1, 0, 1.85, true, 0);
+  placeProp('kitchenSink', -5.5, 0, 9.1, 0, 1.9, true, 0);
+  addSearchContainer('kitchenCabinet', -2.9, 0, 9.1, 0, 1.85, 'ОБЫСКАТЬ КУХОННЫЙ ШКАФ', 0);
+  // Задняя правая комната (x:2..10, z:-10..-6.3): диван у правой стены.
+  placeProp('loungeSofa', 8.9, 0, -8.0, -Math.PI / 2, 2.0, true, 0);
+  // Средняя правая комната (x:2..10, z:-6.3..5.8): sink у правой стены.
+  placeProp('bathroomSink', 9.0, 0, 0.5, Math.PI, 1.85, true, 0);
+  // Передняя правая комната (x:2..10, z:5.8..10): комод у правой стены.
+  addSearchContainer('cabinetBedDrawer', 8.9, 0, 8.6, Math.PI, 1.9, 'ОБЫСКАТЬ ЯЩИКИ', 0);
+
+  // --- 2-й этаж ---
+  placeProp('bedDouble', -6.2, UPPER_FLOOR_Y, -9.3, 0, 1.95, true, 1);
+  addSearchContainer('sideTable', -3.4, UPPER_FLOOR_Y, -9.25, 0, 2.0, 'ОБЫСКАТЬ ТУМБОЧКУ · 2 ЭТАЖ', 1);
+  placeProp('loungeSofa', -8.9, UPPER_FLOOR_Y, -0.5, Math.PI / 2, 1.9, true, 1);
+  addSearchContainer('cabinetBedDrawer', 8.9, UPPER_FLOOR_Y, -8.6, Math.PI, 1.9, 'ОБЫСКАТЬ КОМОД · 2 ЭТАЖ', 1);
+  placeProp('kitchenFridge', -8.7, UPPER_FLOOR_Y, 9.1, 0, 1.75, true, 1);
+  placeProp('kitchenSink', -5.5, UPPER_FLOOR_Y, 9.1, 0, 1.8, true, 1);
+  addSearchContainer('kitchenCabinet', -2.9, UPPER_FLOOR_Y, 9.1, 0, 1.8, 'ОБЫСКАТЬ ШКАФ · 2 ЭТАЖ', 1);
+  placeProp('bathroomSink', 9.0, UPPER_FLOOR_Y, 0.5, Math.PI, 1.8, true, 1);
+  addSearchContainer('sideTable', 8.9, UPPER_FLOOR_Y, 8.6, Math.PI, 1.9, 'ОБЫСКАТЬ ЯЩИК · 2 ЭТАЖ', 1);
 
   assignSearchLoot();
   buildNavigationGrid();
@@ -1260,7 +1440,13 @@ function spawnGranny(source) {
   game.ai.floor = 0;
   const mixer = new THREE.AnimationMixer(visual);
   const clips = visual.animations || source?.animations || [];
-  const walkClip = clips.find((clip) => /walk|walking|zombie/i.test(clip.name)) || clips[0];
+  // Выбираем нормальную прогулочную анимацию, избегая «зомби»-шага:
+  // сначала ищем walk/walking, затем idle/walk-like; «zombie» в последнюю очередь.
+  const walkClip =
+    clips.find((clip) => /^walk(ing)?$/i.test(clip.name)) ||
+    clips.find((clip) => /walk/i.test(clip.name) && !/zomb/i.test(clip.name)) ||
+    clips.find((clip) => /idle|walk/i.test(clip.name)) ||
+    clips[0];
   const attackClip = clips.find((clip) => /attack|bite|lunge/i.test(clip.name));
   let walkAction = null, attackAction = null;
   if (walkClip) {
@@ -1470,6 +1656,93 @@ function startAudio() {
   game.audioStarted = true;
   listener.context.resume().catch(() => {});
   if (game.ambience && !game.ambience.isPlaying) game.ambience.play();
+}
+
+// Синтез звуков бабки (без внешних файлов): скрип/рычание и крик во время jumpscare.
+function synthGrannySound(options = {}) {
+  if (!listener || !game.audioEnabled || !game.audioStarted) return;
+  try {
+    const ctx = listener.context;
+    if (ctx.state !== 'running') return;
+    const now = ctx.currentTime;
+    const { type = 'growl', volume = 0.3, duration = 0.6, target = listener } = options;
+    const out = target?.getOutput?.() || ctx.destination;
+
+    if (type === 'scream') {
+      // Звонкий женский крик: несколько формантных осцилляторов + шум с огибателем.
+      const master = ctx.createGain();
+      master.gain.value = 0;
+      master.connect(out);
+      master.gain.setValueAtTime(0, now);
+      master.gain.linearRampToValueAtTime(volume, now + 0.02);
+      master.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+      const freqs = [380, 620, 980];
+      freqs.forEach((base, i) => {
+        const osc = ctx.createOscillator();
+        osc.type = i === 0 ? 'sawtooth' : 'square';
+        osc.frequency.value = base;
+        osc.frequency.setValueAtTime(base * (0.9 + Math.random() * 0.2), now);
+        osc.frequency.linearRampToValueAtTime(base * (0.75 + Math.random() * 0.3), now + duration);
+        const g = ctx.createGain();
+        g.gain.value = i === 0 ? 0.5 : 0.22;
+        osc.connect(g).connect(master);
+        osc.start(now);
+        osc.stop(now + duration + 0.05);
+      });
+      const noise = ctx.createBufferSource();
+      noise.buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * duration), ctx.sampleRate);
+      const data = noise.buffer.getChannelData(0);
+      for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+      const nf = ctx.createBiquadFilter();
+      nf.type = 'bandpass';
+      nf.frequency.value = 1200;
+      nf.Q.value = 0.8;
+      const ng = ctx.createGain();
+      ng.gain.value = 0.35;
+      noise.connect(nf).connect(ng).connect(master);
+      noise.start(now);
+      noise.stop(now + duration + 0.05);
+      return;
+    }
+
+    // Рычание/скрип бабки: низкий осциллятор с вибрацией + шум.
+    const master = ctx.createGain();
+    master.gain.value = 0;
+    master.connect(out);
+    master.gain.setValueAtTime(0, now);
+    master.gain.linearRampToValueAtTime(volume, now + 0.08);
+    master.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.value = type === 'growl' ? 90 : 140;
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 18;
+    const lfoGain = ctx.createGain();
+    lfoGain.gain.value = 22;
+    lfo.connect(lfoGain).connect(osc.frequency);
+    osc.connect(master);
+    osc.start(now);
+    osc.stop(now + duration + 0.05);
+    lfo.start(now);
+    lfo.stop(now + duration + 0.05);
+
+    const noise = ctx.createBufferSource();
+    noise.buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * duration), ctx.sampleRate);
+    const nd = noise.buffer.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = (Math.random() * 2 - 1) * (1 - i / nd.length);
+    const nf = ctx.createBiquadFilter();
+    nf.type = 'lowpass';
+    nf.frequency.value = 700;
+    const ng = ctx.createGain();
+    ng.gain.value = 0.25;
+    noise.connect(nf).connect(ng).connect(master);
+    noise.start(now);
+    noise.stop(now + duration + 0.05);
+  } catch (error) {
+    console.debug('Granny synth:', error);
+  }
 }
 
 
@@ -1832,49 +2105,24 @@ function collectItem(item) {
 
 function switchFloor() {
   const p = game.player;
-  if (p.stairTransition) return;
   const toFloor = p.floor === 0 ? 1 : 0;
   const target = toFloor === 1 ? STAIR_TOP : STAIR_BOTTOM;
-  const dx = target.x - p.x, dz = target.z - p.z;
-  const travelYaw = Math.atan2(-dx, -dz);
-  p.stairTransition = {
-    elapsed: 0, startedAt: performance.now(), duration: 2.65, fromFloor: p.floor, toFloor,
-    start: { x: p.x, z: p.z, y: p.floorY },
-    end: { x: target.x, z: target.z, y: toFloor ? UPPER_FLOOR_Y : 0 },
-    travelYaw, lookDown: toFloor === 0 ? -0.46 : -0.24,
-  };
+  // Мгновенный перенос: анимация подъёма убрана по требованию.
+  p.x = target.x; p.z = target.z;
+  p.floorY = toFloor ? UPPER_FLOOR_Y : 0;
+  p.targetFloorY = p.floorY;
+  p.floor = toFloor;
   p.vx = 0; p.vz = 0; p.moved = 0;
   game.keys.clear(); game.mobileMove = { x: 0, y: 0 }; game.mobileSprint = false;
+  game.targetYaw = toFloor ? Math.PI : 0;
+  game.targetPitch = 0;
   currentInteractable = null;
-  game.targetYaw = travelYaw;
-  game.targetPitch = p.stairTransition.lookDown;
+  updateInteractable();
 }
 
+// Подъём по лестнице теперь мгновенный — устаревшая анимация больше не используется.
 function updateStairTransition(dt) {
-  const p = game.player, stair = p.stairTransition;
-  if (!stair) return false;
-  stair.elapsed = Math.min(stair.duration, (performance.now() - stair.startedAt) / 1000);
-  const t = stair.elapsed / stair.duration;
-  const eased = t * t * (3 - 2 * t);
-  const stepBob = Math.sin(stair.elapsed * 9.5) * 0.012 * (t < 0.96 ? 1 : 0);
-  p.x = THREE.MathUtils.lerp(stair.start.x, stair.end.x, eased);
-  p.z = THREE.MathUtils.lerp(stair.start.z, stair.end.z, eased);
-  p.floorY = THREE.MathUtils.lerp(stair.start.y, stair.end.y, eased) + stepBob;
-  p.height = THREE.MathUtils.damp(p.height, p.crouched ? 1.12 : 1.68, 8, dt);
-  game.cameraYaw = dampAngle(game.cameraYaw, stair.travelYaw, 4.2, dt);
-  game.cameraPitch = THREE.MathUtils.damp(game.cameraPitch, stair.lookDown, 3.8, dt);
-  camera.position.set(p.x, p.floorY + p.height + stepBob, p.z);
-  camera.rotation.set(game.cameraPitch, game.cameraYaw, 0, 'YXZ');
-  game.onlineSyncTimer = Math.min(game.onlineSyncTimer, 0.08);
-  if (t >= 1) {
-    p.x = stair.end.x; p.z = stair.end.z; p.floorY = stair.end.y; p.targetFloorY = stair.end.y; p.floor = stair.toFloor;
-    p.stairTransition = null;
-    game.targetYaw = stair.toFloor === 1 ? Math.PI : 0;
-    game.targetPitch = 0;
-    currentInteractable = null;
-    updateInteractable();
-  }
-  return true;
+  return false;
 }
 
 function doInteract() {
@@ -1885,6 +2133,7 @@ function doInteract() {
     container.searched = true;
     const item = items.find((entry) => entry.id === container.rewardId && !entry.collected);
     if (item) collectItem(item);
+    else showToastCenter('Ничего не найдено', 2000);
     syncContainerState(container);
     emitNoise(0.4, 0.5);
   } else if (currentInteractable.type === 'stairs') {
@@ -1980,12 +2229,12 @@ function transitionGrannyFloor(nextFloor) {
 
 function beginJumpscare(asObserver = false) {
   if (game.deathSequence || game.finished || !granny) return;
-  // В мультиплеере пойманный игрок не «умирает» — он становится наблюдателем:
-  // камера переходит к первому лицу другого игрока, бабка продолжает преследовать
-  // оставшихся (и не вешается, потому что симуляция не остановилась).
+  // В мультиплеере, когда бабка ловит игрока — умирают ВСЕ: матч завершается
+  // для каждого клиента (пойманный видит jumpscare, остальные получают сигнал и
+  // также завершают игру). Наблюдатель-режим больше не активируется по ловле.
   if (game.online) {
-    enterObserverMode();
-    return;
+    if (game.online.publish) game.online.publish({ caught: true, alive: false, matchOver: true }).catch(() => {});
+    // Пойманный игрок играет jumpscare локально, затем завершает игру.
   }
   const forward = new THREE.Vector3();
   camera.getWorldDirection(forward);
@@ -1993,19 +2242,31 @@ function beginJumpscare(asObserver = false) {
   if (horizontal.lengthSq() < 0.001) horizontal.set(0, 0, -1);
   const player = game.player;
   const floorY = player.floor ? UPPER_FLOOR_Y : 0;
-  const startDistance = 4.8, endDistance = 2.8;
-  const start = { x: player.x + horizontal.x * startDistance, z: player.z + horizontal.z * startDistance };
-  const end = { x: player.x + horizontal.x * endDistance, z: player.z + horizontal.z * endDistance };
+  // Бабка встаёт прямо перед пойманным игроком и смотрит в камеру;
+  // камера подносится вплотную к её лицу — виден только её голова.
+  const grannyX = player.x + horizontal.x * 1.6;
+  const grannyZ = player.z + horizontal.z * 1.6;
   granny.walkAction?.stop();
   granny.attackAction?.stop();
-  granny.root.position.set(start.x, floorY, start.z);
-  granny.root.rotation.y = Math.atan2(player.x - start.x, player.z - start.z);
+  granny.root.position.set(grannyX, floorY, grannyZ);
+  // Бабка смотрит на того, кого ловит (обратно к камере/игроку).
+  granny.root.rotation.y = Math.atan2(player.x - grannyX, player.z - grannyZ);
   granny.floor = player.floor; game.ai.floor = player.floor;
   granny.visual.traverse((object) => { if (object.isMesh) object.visible = true; });
   game.deathSequence = {
-    elapsed: 0, startedAt: performance.now(), duration: 3.4, start, end, floorY,
-    startScale: granny.root.scale.x || 1,
+    elapsed: 0, startedAt: performance.now(), duration: 3.4,
+    grannyPos: { x: grannyX, z: grannyZ }, floorY,
+    // Камера вплотную к лицу бабки, смотрит на неё.
+    cameraOffset: { x: -horizontal.x * 0.55, z: -horizontal.z * 0.55 },
+    lookAt: { x: grannyX, y: floorY + 1.5, z: grannyZ },
   };
+  // Позади бабки — чёрный фон (только для пойманного игрока).
+  game.deathSequence.prevBackground = scene.background;
+  game.deathSequence.prevFog = scene.fog;
+  scene.background = new THREE.Color(0x000000);
+  scene.fog = null;
+  // Режущий женский крик во время jumpscare.
+  synthGrannySound({ type: 'scream', volume: 0.9, duration: 1.6 });
   game.paused = true;
   dom.hud.classList.add('hidden');
   dom.mobileControls.classList.add('hidden');
@@ -2021,13 +2282,24 @@ function updateJumpscare() {
   if (!scare || !granny) return;
   scare.elapsed = Math.min(scare.duration, (performance.now() - scare.startedAt) / 1000);
   const t = scare.elapsed / scare.duration;
-  const eased = 1 - Math.pow(1 - t, 3);
-  granny.root.position.x = THREE.MathUtils.lerp(scare.start.x, scare.end.x, eased);
-  granny.root.position.z = THREE.MathUtils.lerp(scare.start.z, scare.end.z, eased);
+  // Голова бабки дрожит/трясётся.
+  const shake = Math.sin(scare.elapsed * 46) * 0.035 + Math.sin(scare.elapsed * 31) * 0.02;
+  const lookYaw = Math.atan2(game.player.x - scare.grannyPos.x, game.player.z - scare.grannyPos.z) + shake;
+  granny.root.rotation.y = lookYaw;
+  granny.root.position.x = scare.grannyPos.x + Math.sin(scare.elapsed * 40) * 0.012;
+  granny.root.position.z = scare.grannyPos.z + Math.cos(scare.elapsed * 37) * 0.012;
   granny.root.position.y = scare.floorY;
-  granny.root.scale.setScalar(scare.startScale * (1 + 0.1 * eased));
-  granny.root.rotation.y = Math.atan2(game.player.x - granny.root.position.x, game.player.z - granny.root.position.z);
+  // Камера вплотную к лицу: позиционируем рядом с бабкой, смотрим на её голову.
+  camera.position.set(
+    scare.grannyPos.x + scare.cameraOffset.x,
+    scare.floorY + 1.45,
+    scare.grannyPos.z + scare.cameraOffset.z,
+  );
+  camera.lookAt(scare.lookAt.x, scare.lookAt.y, scare.lookAt.z);
   if (scare.elapsed >= scare.duration) {
+    // Восстанавливаем фон и завершаем игру.
+    if (scare.prevBackground) scene.background = scare.prevBackground;
+    scene.fog = scare.prevFog;
     game.deathSequence = null;
     game.finished = true;
     game.paused = true;
@@ -2051,14 +2323,16 @@ function hideObserverStatus() {
 }
 
 function enterObserverMode() {
+  if (game.finished || !game.online) return;
   game.observer = true;
   game.watchingUid = null;
-  // Игра не ставится на паузу: симуляция бабки (на хосте) продолжается,
-  // и она не вешается после ловли одного игрока.
+  // Игра не ставится на паузу: симуляция бабки (на хосте) продолжается.
   game.paused = false;
+  dom.pause.classList.add('hidden');
   if (document.pointerLockElement) document.exitPointerLock?.();
   game.mouseDrag = false;
   dom.lookStick.classList.add('hidden');
+  dom.observerSwitch.classList.remove('hidden');
   // Сообщаем остальным, что этот игрок пойман — его больше не преследует бабка.
   if (game.online?.publish) game.online.publish({ caught: true, alive: false }).catch(() => {});
   showObserverStatus('НАБЛЮДЕНИЕ · Смотрите за остальными');
@@ -2077,19 +2351,7 @@ function pickWatchedPlayer() {
   return best;
 }
 
-function updateObserverCamera(dt) {
-  const watched = pickWatchedPlayer();
-  if (!watched) {
-    // Никого живым не осталось — для наблюдателя игра окончена (погибель, не победа).
-    game.observer = false;
-    hideObserverStatus();
-    game.finished = true;
-    game.paused = true;
-    if (document.pointerLockElement) document.exitPointerLock?.();
-    dom.death.classList.remove('hidden');
-    return;
-  }
-  game.watchingUid = watched.root.userData.playerId;
+function applyWatchedCamera(watched, dt) {
   const t = watched.target;
   const height = t.crouched ? 1.12 : 1.68;
   const floorY = Number.isFinite(t.floorY) ? t.floorY : (t.floor ? UPPER_FLOOR_Y : 0);
@@ -2104,6 +2366,44 @@ function updateObserverCamera(dt) {
     0,
     'YXZ',
   );
+}
+
+// Переключение наблюдения на следующего/предыдущего живого игрока.
+function switchWatchedPlayer(direction) {
+  if (!game.observer) return;
+  const alive = [...game.remotePlayers.entries()].filter(([, r]) => r.target.alive !== false);
+  if (alive.length < 2) return;
+  const uids = alive.map(([uid]) => uid);
+  let index = uids.indexOf(game.watchingUid);
+  if (index < 0) index = 0;
+  index = (index + direction + uids.length) % uids.length;
+  game.watchingUid = uids[index];
+}
+
+function updateObserverCamera(dt) {
+  if (!game.observer) return;
+  // Переключение игрока для наблюдения (кнопки или ЛКМ/ПКМ).
+  if (game.watchingUid) {
+    const watched = game.remotePlayers.get(game.watchingUid);
+    if (watched && watched.target.alive !== false) {
+      applyWatchedCamera(watched, dt);
+      return;
+    }
+  }
+  const watched = pickWatchedPlayer();
+  if (!watched) {
+    // Никого живым не осталось — для наблюдателя игра окончена (погибель, не победа).
+    game.observer = false;
+    hideObserverStatus();
+    dom.observerSwitch.classList.add('hidden');
+    game.finished = true;
+    game.paused = true;
+    if (document.pointerLockElement) document.exitPointerLock?.();
+    dom.death.classList.remove('hidden');
+    return;
+  }
+  game.watchingUid = watched.root.userData.playerId;
+  applyWatchedCamera(watched, dt);
 }
 
 function updateGranny(dt) {
@@ -2329,10 +2629,21 @@ function updateGranny(dt) {
       if (granny.walkAction.getEffectiveWeight() < 0.9) granny.walkAction.fadeIn(0.18);
     }
   }
-  granny.root.position.y = ai.floor ? UPPER_FLOOR_Y : 0;
+  granny.root.position.y = (ai.floor ? UPPER_FLOOR_Y : 0) + (ai.moving ? Math.abs(Math.sin(granny.mixer.time * (ai.state === 'chase' ? 9 : 6))) * 0.06 : 0);
   if (ai.state === 'patrol' || ai.state === 'investigate') {
     ai.trapTimer += dt;
     if (ai.trapTimer >= 18) ai.trapTimer = placeGrannyTrap() ? 0 : 12;
+  }
+  // Нормальные звуки бабки: рычание/скрип, чаще когда она в погоне или рядом.
+  ai.soundTimer = (ai.soundTimer ?? 0) - dt;
+  if (ai.soundTimer <= 0) {
+    const close = Math.hypot(game.player.x - gx, game.player.z - gz, game.player.floor === ai.floor ? 0 : UPPER_FLOOR_Y) < 8;
+    if (ai.state === 'chase' || (close && ai.state !== 'attack')) {
+      synthGrannySound({ type: ai.state === 'chase' ? 'growl' : 'creak', volume: ai.state === 'chase' ? 0.4 : 0.22, duration: 0.7 });
+      ai.soundTimer = ai.state === 'chase' ? 2.2 + Math.random() * 1.8 : 4.5 + Math.random() * 3;
+    } else {
+      ai.soundTimer = 3 + Math.random() * 2;
+    }
   }
   granny.mixer?.update(dt);
 }
@@ -2457,6 +2768,7 @@ function renderLoop() {
   if (game.deathSequence) updateJumpscare(dt);
   else if (game.started && !game.paused && !game.finished) updateGame(dt);
   else if (!game.started) updateMenuScene(dt);
+  if (game.started && !game.paused) updateNameTags();
   renderer.render(scene, camera);
 }
 
@@ -2513,7 +2825,7 @@ async function startGame() {
   if (isFirebaseConfigured()) {
     try {
       connection = await withTimeout(
-        connectToQuickGame({ displayName: 'Игрок' }, receiveOnlinePlayers, receiveOnlineWorld, receiveOnlineHost, receiveOnlineError),
+        connectToQuickGame({ displayName: game.settings.nickname }, receiveOnlinePlayers, receiveOnlineWorld, receiveOnlineHost, receiveOnlineError),
         ONLINE_CONNECT_TIMEOUT_MS,
         'Сервер не отвечает (тайм-аут 9 с). Проверьте интернет и блокировщики.',
       );
@@ -2532,6 +2844,21 @@ async function startGame() {
     applySharedWorld(game.pendingRemoteWorld || game.online.world || {});
     game.pendingHostId = null;
   }
+
+  // В мультиплеере — сначала лобби: хост запускает матч, остальные ждут.
+  if (game.online) {
+    game.lobby = true;
+    showLobby();
+    if (onlineError) showOnlineError(onlineError);
+    return;
+  }
+  if (onlineError) showOnlineError(onlineError);
+  beginMatch();
+}
+
+// Фактический запуск матча (одиночная или после подтверждения хоста в лобби).
+function beginMatch() {
+  game.lobby = false;
   const slot = game.online ? game.online.slot % PLAYER_SPAWN_POINTS.length : 0;
   const spawn = PLAYER_SPAWN_POINTS[slot];
   Object.assign(game.player, { x: spawn.x, z: spawn.z, vx: 0, vz: 0, floor: 0, floorY: 0, targetFloorY: 0, height: 1.68, crouched: false, stamina: 100, stairTransition: null });
@@ -2542,6 +2869,7 @@ async function startGame() {
   game.observer = false;
   game.watchingUid = null;
   hideObserverStatus();
+  dom.observerSwitch.classList.add('hidden');
   placeGrannyAtRandomSpawn();
   camera.position.set(game.player.x, game.player.height, game.player.z);
   camera.rotation.set(0, 0, 0, 'YXZ');
@@ -2550,7 +2878,7 @@ async function startGame() {
     const colorHex = Number.parseInt(game.online.profile.color.slice(1), 16);
     game.localAvatar = createPlayerAvatar(game.online.uid, Number.isFinite(colorHex) ? colorHex : PLAYER_COLORS[slot], false);
     receiveOnlinePlayers(game.online.players || {});
-    game.online.publish({ x: game.player.x, z: game.player.z, floor: 0, floorY: 0, yaw: 0, pitch: 0, crouched: false }).catch(() => {});
+    game.online.publish({ x: game.player.x, z: game.player.z, floor: 0, floorY: 0, yaw: 0, pitch: 0, crouched: false, displayName: game.settings.nickname, alive: true }).catch(() => {});
   } else {
     dom.onlineStatus?.classList.add('hidden');
   }
@@ -2558,9 +2886,9 @@ async function startGame() {
   game.started = true;
   if (game.online && game.online.hostId === game.online.uid) publishWorldSnapshot();
   dom.start.classList.add('hidden');
+  dom.lobbyScreen.classList.add('hidden');
   dom.hud.classList.remove('hidden');
-  if (onlineError && !game.online) showOnlineError(onlineError);
-  dom.lookStick.classList.remove('hidden');
+  updateLookStickVisibility();
   if (mobileDevice) {
     dom.mobileControls.classList.remove('hidden');
     requestLandscapeOrientation();
@@ -2570,6 +2898,51 @@ async function startGame() {
   if (shouldUsePointerLock()) {
     try { dom.canvas.requestPointerLock?.(); } catch { /* браузер не поддерживает pointer lock — вращение мыши */ }
   }
+}
+
+// --- Лобби ---
+function isHost() {
+  return Boolean(game.online && game.online.hostId === game.online.uid);
+}
+
+function renderLobby() {
+  if (!game.lobby || !dom.lobbyPlayers) return;
+  const players = game.online?.players || {};
+  const entries = Object.entries(players);
+  dom.lobbyPlayers.innerHTML = '';
+  const order = entries.sort((a, b) => (a[1]?.joinedAt || 0) - (b[1]?.joinedAt || 0));
+  for (const [uid, data] of order) {
+    const row = document.createElement('div');
+    row.className = 'lobby-player' + (uid === game.online?.uid ? ' host' : '');
+    const dot = document.createElement('span');
+    dot.className = 'status-dot';
+    const name = document.createElement('span');
+    name.textContent = (data && data.displayName) || (uid === game.online?.uid ? game.settings.nickname : 'Игрок');
+    row.append(dot, name);
+    if (uid === game.online?.uid) {
+      const tag = document.createElement('span');
+      tag.className = 'lobby-tag';
+      tag.textContent = 'ХОСТ';
+      row.append(tag);
+    }
+    dom.lobbyPlayers.append(row);
+  }
+  const count = entries.length;
+  dom.lobbyStatus.textContent = isHost() ? `Подготовьтесь — игроков: ${count}/4` : `Жду запуска хоста… игроков: ${count}/4`;
+  // Кнопка запуска — только у хоста.
+  dom.lobbyStartButton.classList.toggle('hidden', !isHost());
+}
+
+function showLobby() {
+  dom.start.classList.add('hidden');
+  dom.lobbyScreen.classList.remove('hidden');
+  dom.hud.classList.add('hidden');
+  renderLobby();
+}
+
+function lobbyStartMatch() {
+  if (!isHost() || !game.lobby) return;
+  beginMatch();
 }
 
 function restartGame() {
@@ -2610,6 +2983,12 @@ function onMouseMove(event) {
 
 function setupMouseLook() {
   dom.canvas.addEventListener('pointerdown', (event) => {
+    // В режиме наблюдателя: ЛКМ — следующий, ПКМ — предыдущий игрок.
+    if (game.observer && !mobileDevice && (event.button === 0 || event.button === 2)) {
+      event.preventDefault();
+      switchWatchedPlayer(event.button === 0 ? 1 : -1);
+      return;
+    }
     if (mobileDevice || event.button !== 0 || !game.started || game.paused) return;
     if (document.pointerLockElement !== dom.canvas) {
       game.mouseDrag = true;
@@ -2634,6 +3013,8 @@ function setupMouseLook() {
       game.mouseDrag = false;
     }
   });
+  // ПКМ используется для переключения наблюдателя — меню не всплывает.
+  dom.canvas.addEventListener('contextmenu', (event) => { if (game.observer) event.preventDefault(); });
 }
 
 function setupJoystick(element) {
@@ -2761,9 +3142,26 @@ function setupUI() {
   dom.startButton.addEventListener('click', startGame);
   dom.resumeButton.addEventListener('click', resumeGame);
   dom.pauseButton.addEventListener('click', showPause);
+  // Режущий/наблюдательный режим: вход из паузы (переключение игрока — кнопки или ЛКМ/ПКМ).
+  dom.spectateButton?.addEventListener('click', enterObserverMode);
   dom.restartButton.addEventListener('click', restartGame);
   dom.retryButton.addEventListener('click', restartGame);
   dom.playAgainButton.addEventListener('click', restartGame);
+
+  // Настройки
+  dom.settingsButton.addEventListener('click', openSettings);
+  dom.settingsCloseButton.addEventListener('click', closeSettings);
+  dom.controlPointerButton.addEventListener('click', () => { game.settings.control = 'pointer'; saveSettings(); applyControlChoice(); updateLookStickVisibility(); });
+  dom.controlJoystickButton.addEventListener('click', () => { game.settings.control = 'joystick'; saveSettings(); applyControlChoice(); updateLookStickVisibility(); });
+  dom.nicknameInput.addEventListener('input', () => { game.settings.nickname = dom.nicknameInput.value.trim().slice(0, 14) || 'Игрок'; saveSettings(); });
+  dom.nicknameInput.addEventListener('change', () => { if (game.online) publishProfile(); });
+
+  // Кнопки переключения наблюдателя
+  dom.observerPrevButton.addEventListener('click', () => switchWatchedPlayer(-1));
+  dom.observerNextButton.addEventListener('click', () => switchWatchedPlayer(1));
+  // Запуск матча из лобби (только хост)
+  dom.lobbyStartButton.addEventListener('click', lobbyStartMatch);
+
   window.addEventListener('keydown', onKeyDown, { passive: false });
   window.addEventListener('keyup', onKeyUp);
   window.addEventListener('blur', () => { game.keys.clear(); game.mobileSprint = false; game.mobileMove = { x: 0, y: 0 }; game.lookStick = { active: false, x: 0, y: 0 }; });
@@ -2796,6 +3194,7 @@ async function loadGrannyModel() {
 }
 
 async function init() {
+  loadSettings();
   document.body.classList.toggle('touch-device', mobileDevice);
   try {
     setLoadProgress(6, 'Запускаем рендерер…');
