@@ -29,6 +29,36 @@
       <div class="menu-content">
         <h1 class="menu-title" aria-label="The Quiet Home">The Quiet <br /><em>Home</em></h1>
         <button id="startButton" class="primary-button"><span>ИГРАТЬ</span><b>↗</b></button>
+        <button id="settingsButton" class="secondary-button">НАСТРОЙКИ</button>
+      </div>
+    </section>
+
+    <section id="settingsScreen" class="screen modal-screen hidden" aria-label="Настройки">
+      <div class="modal-card settings-card">
+        <p class="eyebrow">НАСТРОЙКИ</p>
+        <h2>ПАРАМЕТРЫ</h2>
+        <div class="setting-row">
+          <label for="nicknameInput">Никнейм</label>
+          <input id="nicknameInput" type="text" maxlength="14" placeholder="Игрок" autocomplete="off" />
+        </div>
+        <div class="setting-row">
+          <label>Тип управления</label>
+          <div class="setting-choice">
+            <button id="controlPointerButton" class="choice-button" type="button">Pointer Lock</button>
+            <button id="controlJoystickButton" class="choice-button" type="button">Джойстик</button>
+          </div>
+        </div>
+        <button id="settingsCloseButton" class="secondary-button">ЗАКРЫТЬ</button>
+      </div>
+    </section>
+
+    <section id="lobbyScreen" class="screen modal-screen hidden" aria-label="Лобби">
+      <div class="modal-card">
+        <p class="eyebrow">ЛОББИ</p>
+        <h2>ОЖИДАНИЕ<br /><em>ИГРОКОВ</em></h2>
+        <div id="lobbyPlayers" class="lobby-players"></div>
+        <button id="lobbyStartButton" class="primary-button hidden"><span>ЗАПУСК</span><b>↗</b></button>
+        <p id="lobbyStatus" class="modal-copy">Жду запуска хоста…</p>
       </div>
     </section>
 
@@ -36,6 +66,7 @@
       <div class="modal-card">
         <p class="eyebrow">ПЕРЕДЫШКА</p><h2>ПАУЗА</h2>
         <button id="resumeButton" class="primary-button"><span>ПРОДОЛЖИТЬ</span><b>↗</b></button>
+        <button id="spectateButton" class="secondary-button">СМОТРЕТЬ ЗА ИГРОКАМИ</button>
         <button id="restartButton" class="secondary-button">НАЧАТЬ ЗАНОВО</button>
         <p class="modal-foot">ESC — продолжить</p>
       </div>
@@ -68,8 +99,12 @@
           <strong id="objectiveText">НАЙДИ КЛЮЧ ОТ ВЫХОДА</strong>
         </div>
       </div>
-      <div id="onlineStatus" class="online-status hidden" aria-live="polite"></div>
-      <div id="observerStatus" class="online-status observer-status hidden" aria-live="polite"></div>
+      <div id="onlineStatus" class="online-status hidden" aria-live="polite"><span class="status-dot"></span><span id="onlineCount">0 / 4</span></div>
+      <div id="observerStatus" class="online-status observer-status hidden" aria-live="polite"><span class="status-dot"></span><span>НАБЛЮДЕНИЕ</span></div>
+      <div id="observerSwitch" class="observer-switch hidden">
+        <button id="observerPrevButton" class="observer-btn" aria-label="Previous player">◀</button>
+        <button id="observerNextButton" class="observer-btn" aria-label="Next player">▶</button>
+      </div>
       <button id="pauseButton" class="pause-button" aria-label="Пауза"><span></span><span></span></button>
       <div class="stamina-panel" aria-label="Выносливость">
         <span>ВЫНОСЛИВОСТЬ</span>
@@ -81,7 +116,12 @@
       </div>
       <div id="damageFlash" class="damage-flash"></div>
       <div id="trapNotice" class="trap-notice hidden" role="status" aria-live="assertive">КАПКАН ЗАДЕЛ ТЕБЯ — ВЫРЫВАЙСЯ</div>
+      <div id="toastCenter" class="toast toast-center hidden" role="status" aria-live="polite"></div>
+      <div id="toastLeft" class="toast toast-left hidden" role="status" aria-live="polite"><span class="status-dot"></span><span id="toastLeftText"></span></div>
     </section>
+
+    <!-- Именные Tags над головами игроков (локальный + удалённые). -->
+    <div id="nameTags" class="name-tags" aria-hidden="true"></div>
 
     <section id="mobileControls" class="mobile-controls hidden" aria-label="Сенсорное управление">
       <div class="mobile-stick move-stick" id="moveStick" aria-label="Движение">
