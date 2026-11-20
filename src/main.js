@@ -3243,8 +3243,21 @@ async function init() {
     renderLoop();
   } catch (error) {
     console.error(error);
-    showError('Не удалось загрузить сцену. Откройте проект через npm run dev и убедитесь, что браузер поддерживает WebGL 2.');
+    const detail = (error && (error.message || String(error))) || 'неизвестная ошибка';
+    showError('Не удалось загрузить сцену: ' + detail + '. Откройте проект через npm run dev и убедитесь, что браузер поддерживает WebGL 2.');
   }
 }
+
+// Глобальные перехватчики — чтобы любая непойманная ошибка тоже отображалась на экране,
+// а не просто висла чёрным экраном.
+window.addEventListener('error', (event) => {
+  const msg = event.error?.message || event.message || 'неизвестная ошибка';
+  showError('Ошибка при запуске: ' + msg);
+});
+window.addEventListener('unhandledrejection', (event) => {
+  const reason = event.reason;
+  const msg = (reason && (reason.message || String(reason))) || 'неизвестная ошибка';
+  showError('Ошибка при запуске: ' + msg);
+});
 
 init();
